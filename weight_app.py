@@ -15,28 +15,38 @@ WATER_SHEET_NAME = 'Water Log'
 # 設定時區 (全域強制使用台北時間 GMT+8)
 TAIPEI_TZ = pytz.timezone('Asia/Taipei')
 
-# --- 1. 連接 Google Sheets ---
+# --- 1. 連接 Google Sheets (核心修復區) ---
 @st.cache_resource
 def get_google_sheet(sheet_name):
+    """
+    取得 Google Sheet 分頁。
+    修復邏輯：如果分頁存在但內容是空的(標題遺失)，會自動補上標題。
+    """
     credentials = st.secrets["service_account_info"]
     gc = gspread.service_account_from_dict(credentials)
     sh = gc.open(SHEET_ID)
+    
+    # 定義各個分頁該有的標題
+    HEADERS = {
+        FOOD_SHEET_NAME: ['日期', '時間', '食物名稱', '熱量', '蛋白質', '碳水', '脂肪'],
+        WATER_SHEET_NAME: ['日期', '時間', '水量(ml)'],
+        WEIGHT_SHEET_NAME: ['日期', '身高', '體重', 'BMI']
+    }
+    
     try:
-        return sh.worksheet(sheet_name)
+        ws = sh.worksheet(sheet_name)
     except gspread.WorksheetNotFound:
-        # 自動建立分頁邏輯
-        if sheet_name == FOOD_SHEET_NAME:
-            new_sheet = sh.add_worksheet(title=sheet_name, rows=1000, cols=7)
-            new_sheet.append_row(['日期', '時間', '食物名稱', '熱量', '蛋白質', '碳水', '脂肪'])
-        elif sheet_name == WATER_SHEET_NAME:
-            new_sheet = sh.add_worksheet(title=sheet_name, rows=1000, cols=3)
-            new_sheet.append_row(['日期', '時間', '水量(ml)'])
-        elif sheet_name == WEIGHT_SHEET_NAME:
-            new_sheet = sh.add_worksheet(title=sheet_name, rows=1000, cols=4)
-            new_sheet.append_row(['日期', '身高', '體重', 'BMI'])
-        else:
-            new_sheet = sh.add_worksheet(title=sheet_name, rows=1000, cols=4)
-        return new_sheet
+        # 找不到就新建
+        ws = sh.add_worksheet(title=sheet_name, rows=1000, cols=10)
+    
+    # --- 自動修復檢查 ---
+    # 檢查第一列是否有資料，如果沒有，代表是空表，必須補上標題
+    existing_data = ws.get_values('A1:Z1') 
+    if not existing_data and sheet_name in HEADERS:
+        ws.append_row(HEADERS[sheet_name])
+        print(f"已自動修復 {sheet_name} 的標題列")
+        
+    return ws
 
 # --- 2. 設定 Google AI ---
 if "gemini_api_key" in st.secrets:
@@ -48,7 +58,6 @@ def analyze_food_with_ai(image_data, text_input):
     model_name = 'gemini-2.5-flash'
     model = genai.GenerativeModel(model_name)
     
-    # 取得現在的台北時間，提供給 AI 做參考
     now_dt = datetime.now(TAIPEI_TZ)
     current_time_str = now_dt.strftime("%Y-%m-%d %H:%M")
     
@@ -98,38 +107,57 @@ def save_food_data(date_str, time_str, food, cal, prot, carb, fat):
 
 def save_water_data(vol): 
     ws = get_google_sheet(WATER_SHEET_NAME)
-    # 強制使用台北時間
     now_date = datetime.now(TAIPEI_TZ).date()
     now_time = datetime.now(TAIPEI_TZ).strftime("%H:%M")
     ws.append_row([str(now_date), str(now_time), vol])
 
 def load_data(sheet_name):
+    """安全讀取資料，防止空表報錯"""
     ws = get_google_sheet(sheet_name)
-    records = ws.get_all_records()
-    return pd.DataFrame(records)
+    try:
+        records = ws.get_all_records()
+        if not records: return pd.DataFrame()
+        return pd.DataFrame(records)
+    except Exception:
+        # 如果發生 API 錯誤（例如全空），回傳空 DataFrame
+        return pd.DataFrame()
 
 def calculate_daily_summary(target_date):
     """
     計算「指定日期」的總營養攝取
-    target_date: datetime.date 物件
     """
     target_date_str = str(target_date)
-    
-    df_food = load_data(FOOD_SHEET_NAME)
     totals = {'cal': 0, 'prot': 0, 'carb': 0, 'fat': 0, 'water': 0}
     
-    if not df_food.empty:
-        # 篩選出 target_date 那一天的資料
-        df_target = df_food[df_food['日期'].astype(str) == target_date_str]
-        for col, key in [('熱量', 'cal'), ('蛋白質', 'prot'), ('碳水', 'carb'), ('脂肪', 'fat')]:
-            if col in df_target.columns:
-                totals[key] = pd.to_numeric(df_target[col], errors='coerce').fillna(0).sum()
+    # 1. 計算食物
+    try:
+        df_food = load_data(FOOD_SHEET_NAME)
+        if not df_food.empty and '日期' in df_food.columns:
+            df_target = df_food[df_food['日期'].astype(str) == target_date_str]
+            for col, key in [('熱量', 'cal'), ('蛋白質', 'prot'), ('碳水', 'carb'), ('脂肪', 'fat')]:
+                if col in df_target.columns:
+                    totals[key] = pd.to_numeric(df_target[col], errors='coerce').fillna(0).sum()
+    except Exception as e:
+        print(f"Food log error: {e}")
 
-    df_water = load_data(WATER_SHEET_NAME)
-    if not df_water.empty:
-        # 篩選出 target_date 那一天的資料
-        df_target_water = df_water[df_water['日期'].astype(str) == target_date_str]
-        totals['water'] = pd.to_numeric(df_target_water['水量(ml)'], errors='coerce').fillna(0).sum()
+    # 2. 計算飲水
+    try:
+        df_water = load_data(WATER_SHEET_NAME)
+        if not df_water.empty and '日期' in df_water.columns:
+            df_target_water = df_water[df_water['日期'].astype(str) == target_date_str]
+            
+            # 自動尋找水量欄位 (相容舊版或新版名稱)
+            water_col = None
+            if '水量(ml)' in df_target_water.columns:
+                water_col = '水量(ml)'
+            elif '水量' in df_target_water.columns:
+                water_col = '水量'
+            
+            if water_col:
+                totals['water'] = pd.to_numeric(df_target_water[water_col], errors='coerce').fillna(0).sum()
+                
+    except Exception as e:
+        print(f"Water log error: {e}")
         
     return totals
 
@@ -139,19 +167,15 @@ st.title('🥗 健康管家 AI')
 # --- 儀表板 ---
 st.markdown("### 📅 每日攝取總覽")
 
-# [修改] 增加日期選擇器
 col_date, col_empty = st.columns([1, 2])
 with col_date:
-    # 預設為台北時間的今天
     default_today = datetime.now(TAIPEI_TZ).date()
     view_date = st.date_input("🔍 選擇檢視日期", default_today)
 
 with st.spinner(f"正在讀取 {view_date} 的資料..."):
-    # [修改] 傳入使用者選擇的日期
     daily_stats = calculate_daily_summary(view_date)
 
 col1, col2, col3, col4, col5 = st.columns(5)
-# [修改] 目標改為 2400
 col1.metric("💧 飲水", f"{int(daily_stats['water'])}", delta="目標 2400")
 col2.metric("🔥 熱量", f"{int(daily_stats['cal'])}")
 col3.metric("🥩 蛋白質", f"{int(daily_stats['prot'])}")
@@ -162,12 +186,11 @@ st.divider()
 # --- 分頁區 ---
 tab1, tab2, tab3 = st.tabs(["⚖️ 體重", "📸 飲食 (自動時間)", "💧 飲水"])
 
-# --- Tab 1: 體重 (Weight Log) ---
+# --- Tab 1: 體重 ---
 with tab1:
     col_w1, col_w2 = st.columns([1, 2])
     with col_w1:
         st.subheader("新增體重")
-        # 預設日期為台北時間的今天
         default_date_tw = datetime.now(TAIPEI_TZ).date()
         w_date = st.date_input("日期", default_date_tw, key="w_input_date")
         w_height = st.number_input("身高 (cm)", 100.0, 250.0, 170.0)
@@ -183,14 +206,16 @@ with tab1:
     with col_w2:
         try:
             df_weight = load_data(WEIGHT_SHEET_NAME)
-            if not df_weight.empty:
+            if not df_weight.empty and '體重' in df_weight.columns:
                 st.line_chart(df_weight.set_index('日期')['體重'])
+            else:
+                st.info("尚無體重資料")
         except Exception:
             st.info("尚無體重資料，請先輸入。")
 
-# --- Tab 2: 飲食 (AI 時間版) ---
+# --- Tab 2: 飲食 ---
 with tab2:
-    st.info("💡 提示：輸入「昨天中午吃的」或「早上8點喝的」，AI 會自動推算時間 (GMT+8)！")
+    st.info("💡 提示：輸入「昨天中午吃的」，AI 會自動推算時間 (GMT+8)！")
     
     uploaded_file = st.file_uploader("上傳食物照片", type=["jpg", "png", "jpeg"])
     image = None
@@ -206,18 +231,13 @@ with tab2:
             if res:
                 st.session_state['last_result'] = res
 
-    # 顯示分析結果介面
     if 'last_result' in st.session_state:
         res = st.session_state['last_result']
-        
         st.markdown("#### 🍽️ 分析結果")
         
-        # --- 時間邏輯 (GMT+8) ---
-        # 預設為台北時間的現在
         default_date = datetime.now(TAIPEI_TZ).date()
         default_time = datetime.now(TAIPEI_TZ).time()
         
-        # 如果 AI 有抓到時間，就嘗試覆蓋
         if res.get('date'):
             try:
                 default_date = datetime.strptime(res['date'], "%Y-%m-%d").date()
@@ -232,12 +252,10 @@ with tab2:
                     st.toast(f"⏰ AI 偵測到時間：{res['time']}", icon="✅")
             except: pass
 
-        # 顯示可編輯欄位
         c_date, c_time = st.columns(2)
         sel_date = c_date.date_input("進食日期", default_date, key="f_input_date")
         sel_time = c_time.time_input("進食時間", default_time)
 
-        # 顯示營養素
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("熱量", res['calories'])
         c2.metric("蛋白質", res['protein'])
@@ -246,13 +264,10 @@ with tab2:
         
         st.write(f"**辨識內容：** {res['food_name']}")
         
-        # 儲存按鈕
         if st.button(f"📥 確認儲存"):
             final_time_str = sel_time.strftime("%H:%M")
-            
             save_food_data(sel_date, final_time_str, res['food_name'], 
                            res['calories'], res['protein'], res['carbs'], res.get('fat', 0))
-            
             st.success(f"已儲存於 {sel_date} {final_time_str}")
             del st.session_state['last_result']
             st.rerun()
@@ -280,10 +295,8 @@ with tab3:
 
     st.divider()
     
-    # 這裡顯示的表格，依然跟隨上方的「檢視日期」
-    # 讓使用者可以查看當天的詳細喝水狀況
     df_w = load_data(WATER_SHEET_NAME)
-    if not df_w.empty:
+    if not df_w.empty and '日期' in df_w.columns:
         view_date_str = str(view_date)
         st.caption(f"📅 {view_date_str} 的飲水明細：")
         st.dataframe(df_w[df_w['日期'].astype(str) == view_date_str], use_container_width=True)
