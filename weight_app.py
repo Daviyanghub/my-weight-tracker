@@ -5,8 +5,8 @@ import google.generativeai as genai
 from datetime import datetime, date, time
 from PIL import Image
 import pytz
-import json  # ✨ [新增] 用於安全解析 JSON
-import altair as alt # ✨ [移動] 移到最上方
+import json # 引入 json 庫，用於安全解析
+import altair as alt # 引入 altair 繪圖庫
 
 # --- 設定區 ---
 SHEET_ID = 'My Weight Data'
@@ -36,7 +36,7 @@ def get_google_sheet(sheet_name):
     try:
         ws = sh.worksheet(sheet_name)
     except gspread.WorksheetNotFound:
-        cols = len(HEADERS.get(sheet_name, [])) + 2 # ✨ [優化] 多預留一點空間
+        cols = len(HEADERS.get(sheet_name, [])) + 2
         ws = sh.add_worksheet(title=sheet_name, rows=1000, cols=cols)
     
     # 智慧檢查與修復標題
@@ -44,18 +44,15 @@ def get_google_sheet(sheet_name):
         expected_header = HEADERS[sheet_name]
         try:
             first_row = ws.row_values(1)
-            # ✨ [優化] 增加判斷：如果第一格是日期格式(例如 2025-...)，代表標題遺失
             is_data_in_header = False
             if first_row and len(first_row) > 0:
                 # 簡單檢查：如果第一格包含 "-" 且長度像日期，或者是數字
-                if "-" in str(first_row[0]) or str(first_row[0]).isdigit():
+                if "-" in str(first_row[0]) or str(first_row[0]).replace('.', '', 1).isdigit():
                     is_data_in_header = True
 
             if not first_row or first_row != expected_header or is_data_in_header:
-                # 若原本有資料但沒標題，插入標題
                 if first_row and first_row != expected_header:
                      ws.insert_row(expected_header, index=1)
-                # 若完全空白，附加標題
                 else:
                      ws.append_row(expected_header)
                 st.cache_data.clear()
@@ -64,29 +61,30 @@ def get_google_sheet(sheet_name):
             
     return ws
 
-# --- 讀取配置 ---
+# --- 讀取配置 (目標) ---
 @st.cache_data
 def get_config():
     ws = get_google_sheet(CONFIG_SHEET_NAME)
     records = ws.get_all_records()
-    # ✨ [優化] 強制轉換 Value 為 float/int，避免字串計算錯誤
     config = {}
     for r in records:
         key = r.get('Key')
         val = r.get('Value')
         if key and val is not None:
             try:
-                # 嘗試轉為數字
                 if float(val).is_integer():
                     config[key] = int(val)
                 else:
                     config[key] = float(val)
             except ValueError:
-                config[key] = val # 保持原樣 (如果是字串設定)
+                config[key] = val
 
-    # 設定預設值
+    # 設定預設值 (針對衝刺計畫)
     if 'target_weight' not in config: config['target_weight'] = 75 
     if 'target_water' not in config: config['target_water'] = 2400
+    # ✨ 新增營養目標預設值
+    if 'target_cal' not in config: config['target_cal'] = 2200 
+    if 'target_protein' not in config: config['target_protein'] = 140
     return config
 
 # --- 核心邏輯函式 ---
@@ -129,32 +127,28 @@ def analyze_food_with_ai(image_data, text_input):
         response = model.generate_content(inputs)
         text_resp = response.text
         
-        # ✨ [優化] 清理字串並使用 json.loads 取代 eval
         clean_json = text_resp.replace('```json', '').replace('```', '').strip()
-        # 有時候 AI 會回傳 ```python ... ```，一併清理
         clean_json = clean_json.replace('```python', '').replace('```', '').strip()
         
         st.toast("✅ AI 分析完成！", icon="✨")
-        return json.loads(clean_json) # ⚠️ [安全性修正]
+        return json.loads(clean_json) # 使用 json.loads 提升安全性
     except json.JSONDecodeError:
-        st.error("❌ 錯誤：AI 回傳格式不正確 (JSON Error)")
+        st.error("❌ 錯誤：AI 回傳格式不正確 (JSON Decode Error)")
         return None
     except Exception as e:
         st.error(f"❌ 系統錯誤：{e}")
         return None
 
-# --- 資料讀寫與計算 ---
-
+# --- 資料讀寫與計算 (簡化) ---
+# ... save_config, save_weight_data, save_food_data, save_water_data 函式保持不變 ...
 def save_config(key, value):
     ws = get_google_sheet(CONFIG_SHEET_NAME)
-    # 尋找是否已存在 Key
     try:
         cell = ws.find(key)
         ws.update_cell(cell.row, 2, value)
     except gspread.CellNotFound:
         ws.append_row([key, value])
     except Exception:
-        # 如果 find 失敗的備用方案 (遍歷)
         records = ws.get_all_records()
         found = False
         for i, r in enumerate(records):
@@ -191,7 +185,6 @@ def load_data(sheet_name):
         if not records: return pd.DataFrame()
         df = pd.DataFrame(records)
         if '日期' in df.columns:
-            # ✨ [優化] 統一轉成 datetime 後再轉 str，確保格式一致
             df['日期'] = pd.to_datetime(df['日期'], errors='coerce').dt.strftime('%Y-%m-%d')
         return df
     except Exception:
@@ -206,7 +199,6 @@ def calculate_daily_summary(target_date):
     try:
         df_food = load_data(FOOD_SHEET_NAME)
         if not df_food.empty and '日期' in df_food.columns:
-            # ✨ [優化] 確保比對時都是字串
             df_target = df_food[df_food['日期'].astype(str) == target_date_str]
             for col, key in [('熱量', 'cal'), ('蛋白質', 'prot'), ('碳水', 'carb'), ('脂肪', 'fat')]:
                 if col in df_target.columns:
@@ -218,7 +210,6 @@ def calculate_daily_summary(target_date):
         df_water = load_data(WATER_SHEET_NAME)
         if not df_water.empty and '日期' in df_water.columns:
             df_target_water = df_water[df_water['日期'].astype(str) == target_date_str]
-            # 兼容舊標題
             water_col = '水量(ml)' if '水量(ml)' in df_target_water.columns else ('水量' if '水量' in df_target_water.columns else None)
             
             if water_col:
@@ -226,6 +217,38 @@ def calculate_daily_summary(target_date):
     except Exception: pass
         
     return totals
+
+def calculate_daily_macros_goal(daily_stats, config):
+    """計算並回傳今日營養目標達成狀況及建議"""
+    
+    target_cal = config.get('target_cal', 2200)
+    target_protein = config.get('target_protein', 140)
+    
+    # 計算今日達成率
+    cal_percent = (daily_stats['cal'] / target_cal) * 100 if target_cal > 0 else 0
+    prot_percent = (daily_stats['prot'] / target_protein) * 100 if target_protein > 0 else 0
+    
+    # 計算宏量營養素比例 (Macros Ratio)
+    total_g = daily_stats['prot'] + daily_stats['carb'] + daily_stats['fat']
+    macros_data = pd.DataFrame({
+        'Nutrient': ['蛋白質', '碳水化合物', '脂肪'],
+        'Grams': [daily_stats['prot'], daily_stats['carb'], daily_stats['fat']]
+    })
+    macros_data['Percentage'] = (macros_data['Grams'] / total_g) * 100 if total_g > 0 else 0
+    
+    alerts = []
+    if daily_stats['cal'] > target_cal * 1.1:
+        alerts.append(("🔥 熱量超標", "今日熱量已超出目標 10%。建議控制下一餐攝取。", "red"))
+    elif daily_stats['prot'] < target_protein * 0.8:
+        alerts.append(("🥩 蛋白質不足", f"蛋白質攝取尚缺 {target_protein - daily_stats['prot']:.0f}g，請在睡前補充。", "orange"))
+    
+    return {
+        'cal_percent': cal_percent,
+        'prot_percent': prot_percent,
+        'macros_data': macros_data,
+        'alerts': alerts
+    }
+
 
 # ================= 介面開始 =================
 st.set_page_config(layout="wide", page_title="健康管家 AI")
@@ -235,6 +258,9 @@ st.title('🥗 健康管家 AI')
 config = get_config()
 target_water = config.get('target_water', 2400)
 target_weight = config.get('target_weight', 75)
+target_cal = config.get('target_cal', 2200)
+target_protein = config.get('target_protein', 140)
+
 
 # --- 儀表板 ---
 st.markdown("### 📅 每日攝取總覽")
@@ -246,19 +272,52 @@ with col_date:
 
 with st.spinner(f"正在讀取 {view_date} 的資料..."):
     daily_stats = calculate_daily_summary(view_date)
+    analysis = calculate_daily_macros_goal(daily_stats, config)
 
+# 飲水 Delta
 water_delta = f"目標 {target_water}"
-if daily_stats['water'] < target_water:
+if daily_stats['water'] < target_water * 0.9:
     water_delta = f"↓ 尚缺 {target_water - daily_stats['water']} ml"
-elif daily_stats['water'] > target_water:
+elif daily_stats['water'] > target_water * 1.1:
     water_delta = f"↑ 超出 {daily_stats['water'] - target_water} ml"
 
 col1, col2, col3, col4, col5 = st.columns(5)
 col1.metric("💧 飲水", f"{int(daily_stats['water'])} ml", delta=water_delta)
-col2.metric("🔥 熱量", f"{int(daily_stats['cal'])} kcal")
-col3.metric("🥩 蛋白質", f"{int(daily_stats['prot'])} g")
+col2.metric("🔥 熱量", f"{int(daily_stats['cal'])} kcal", delta=f"目標 {target_cal}")
+col3.metric("🥩 蛋白質", f"{int(daily_stats['prot'])} g", delta=f"目標 {target_protein}")
 col4.metric("🍚 碳水", f"{int(daily_stats['carb'])} g")
 col5.metric("🥑 脂肪", f"{int(daily_stats['fat'])} g")
+st.divider()
+
+# --- 新增：目標達成與警示區 ---
+st.markdown("### 🎯 衝刺計畫追蹤與警示")
+
+if analysis['alerts']:
+    for alert, message, color in analysis['alerts']:
+        st.error(f"⚠️ {alert}: {message}")
+
+col_p1, col_p2, col_p3 = st.columns(3)
+
+# 1. 蛋白質達成率
+col_p1.metric("蛋白質達成率", f"{analysis['prot_percent']:.1f} %", delta=f"目標 {target_protein}g")
+col_p1.progress(min(analysis['prot_percent'] / 100, 1.0))
+
+# 2. 熱量達成率
+col_p2.metric("熱量達成率", f"{analysis['cal_percent']:.1f} %", delta=f"目標 {target_cal} kcal")
+cal_progress_color = 'red' if analysis['cal_percent'] > 100 else 'green'
+col_p2.progress(min(analysis['cal_percent'] / 100, 1.0)) # 顯示進度條
+
+# 3. 宏量營養素圓餅圖
+if not analysis['macros_data'].empty and analysis['macros_data']['Grams'].sum() > 0:
+    chart = alt.Chart(analysis['macros_data']).mark_arc(outerRadius=120).encode(
+        theta=alt.Theta(field="Grams", type="quantitative"),
+        color=alt.Color(field="Nutrient", type="nominal"),
+        order=alt.Order(field="Percentage", sort="descending"),
+        tooltip=["Nutrient", "Grams", alt.Tooltip("Percentage", format=".1f")]
+    ).properties(title="今日營養素比例 (P:C:F)")
+    col_p3.altair_chart(chart, use_container_width=True)
+else:
+    col_p3.info("無數據，請先紀錄飲食。")
 st.divider()
 
 # --- 分頁區 ---
@@ -293,15 +352,14 @@ with tab1:
             # 繪製圖表
             chart_base = alt.Chart(df_weight).encode(
                 x=alt.X('日期:T', title="日期"), 
-                y=alt.Y('體重:Q', title="體重 (kg)", scale=alt.Scale(zero=False)) # ✨ [優化] zero=False 讓曲線變化更明顯
+                y=alt.Y('體重:Q', title="體重 (kg)", scale=alt.Scale(zero=False))
             )
             line = chart_base.mark_line(point=True).encode(tooltip=['日期:T', '體重:Q'])
             
             # 目標線
             goal_line = alt.Chart(pd.DataFrame({'目標體重': [target_weight]})).mark_rule(color='red', strokeDash=[5, 5]).encode(y='目標體重')
 
-            st.altair_chart(line + goal_line, use_container_width=True)
-            # ✨ [優化] 只顯示最近 50 筆，避免太長
+            st.altair_chart(line + goal_line, use_container_width=True) 
             st.dataframe(df_weight.sort_values(by='日期', ascending=False).head(50), use_container_width=True)
         else:
             st.info("尚無體重資料")
@@ -361,7 +419,6 @@ with tab2:
     st.divider()
     df_food = load_data(FOOD_SHEET_NAME)
     if not df_food.empty:
-        # ✨ [優化] 只顯示最近 50 筆
         st.dataframe(df_food.sort_values(by=['日期', '時間'], ascending=False).head(50), use_container_width=True)
 
 # --- Tab 3: 飲水 ---
@@ -389,7 +446,6 @@ with tab3:
     st.divider()
     df_w = load_data(WATER_SHEET_NAME)
     if not df_w.empty:
-        # ✨ [優化] 只顯示最近 50 筆
         st.dataframe(df_w.sort_values(by=['日期', '時間'], ascending=False).head(50), use_container_width=True)
 
 # --- Tab 4: 設定 ---
@@ -397,15 +453,24 @@ with tab4:
     st.subheader("⚙️ 應用程式設定")
     st.markdown("設定你的健康追蹤目標")
     
-    # ✨ [優化] 確保輸入框拿到的是數字型別，避免報錯
     curr_w_target = float(target_weight)
     curr_water_target = int(target_water)
+    curr_cal_target = int(target_cal)
+    curr_protein_target = int(target_protein)
 
+
+    st.markdown("#### 體重與飲水目標")
     new_target_weight = st.number_input("目標體重 (kg)", 30.0, 150.0, curr_w_target, key="set_target_w")
     new_target_water = st.number_input("每日飲水目標 (ml)", 1000, 5000, curr_water_target, step=100, key="set_target_h")
+
+    st.markdown("#### 營養素目標 (衝刺計畫)")
+    st.caption("建議高蛋白攝取，幫助維持肌肉量")
+    new_target_cal = st.number_input("每日熱量目標 (kcal)", 1000, 5000, curr_cal_target, key="set_target_cal")
+    new_target_protein = st.number_input("每日蛋白質目標 (g)", 50, 300, curr_protein_target, key="set_target_protein")
     
     if st.button("儲存目標設定"):
         save_config('target_weight', new_target_weight)
         save_config('target_water', new_target_water)
+        save_config('target_cal', new_target_cal)
+        save_config('target_protein', new_target_protein)
         st.success("✅ 設定已儲存！")
-        # 不需要手動重新整理，save_config 內已清除快取，下次 rerun 會讀到新的
