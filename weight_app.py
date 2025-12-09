@@ -1,84 +1,97 @@
 import streamlit as st
 import pandas as pd
-import os
+import gspread
 from datetime import date
 
-# --- 設定檔案名稱 ---
-FILE_NAME = 'weight_history.csv'
+# --- 設定區 ---
+# 這裡必須跟你的 Google 試算表名稱一模一樣
+SHEET_NAME = 'My Weight Data'
 
-# --- 介面標題 ---
-st.title('🏋️‍♂️ 我的體重監控 APP (v2.0)')
-st.write('每天記錄一點點，看見進步的曲線！')
+# --- 連接 Google Sheets 函式 (有快取功能，不會每次都重連) ---
+@st.cache_resource
+def get_google_sheet():
+    # 從 Secrets 裡讀取鑰匙
+    credentials = st.secrets["service_account_info"]
+    gc = gspread.service_account_from_dict(credentials)
+    sh = gc.open(SHEET_NAME)
+    return sh.sheet1
+
+# --- 讀取資料函式 ---
+def load_data():
+    sheet = get_google_sheet()
+    # 讀取所有紀錄
+    records = sheet.get_all_records()
+    # 如果是空的，回傳空的 DataFrame
+    if not records:
+        return pd.DataFrame(columns=['日期', '身高', '體重', 'BMI'])
+    return pd.DataFrame(records)
+
+# --- 寫入資料函式 ---
+def save_data(date_str, height, weight, bmi):
+    sheet = get_google_sheet()
+    # 如果是第一筆資料（表頭不存在），先寫入表頭
+    if len(sheet.get_all_values()) == 0:
+        sheet.append_row(['日期', '身高', '體重', 'BMI'])
+    
+    # 寫入新的一行
+    sheet.append_row([str(date_str), height, weight, bmi])
+
+# ================= 介面開始 =================
+
+st.title('☁️ 雲端體重監控 APP (永久保存版)')
+st.write(f'資料儲存於：Google Sheet ({SHEET_NAME})')
 
 # --- 左側：輸入區 ---
 with st.sidebar:
     st.header("📝 新增紀錄")
     input_date = st.date_input("選擇日期", date.today())
+    input_height = st.number_input("身高 (cm)", 100.0, 250.0, 170.0, 0.1)
+    input_weight = st.number_input("體重 (kg)", 0.0, 200.0, step=0.1, format="%.1f")
     
-    # 新增：身高欄位 (預設 170，你可以自己改)
-    input_height = st.number_input("身高 (cm)", min_value=100.0, max_value=250.0, value=170.0, step=0.1)
-    
-    input_weight = st.number_input("體重 (kg)", min_value=0.0, max_value=200.0, step=0.1, format="%.1f")
-    
-    # 計算 BMI 預覽
     if input_height > 0:
         bmi = input_weight / ((input_height / 100) ** 2)
-        st.caption(f"目前計算 BMI: {bmi:.1f}")
+        st.caption(f"預覽 BMI: {bmi:.1f}")
 
-    if st.button("儲存紀錄"):
-        # 1. 整理資料
-        new_data = pd.DataFrame({
-            '日期': [input_date],
-            '體重': [input_weight],
-            'BMI': [round(bmi, 1)] # 把 BMI 也存進去
-        })
-        
-        # 2. 存檔
-        if not os.path.exists(FILE_NAME):
-            new_data.to_csv(FILE_NAME, index=False)
-        else:
-            # 如果舊檔案沒有 BMI 欄位，這行會確保新資料能順利寫入
-            new_data.to_csv(FILE_NAME, mode='a', header=False, index=False)
-            
-        st.success(f"已儲存：{input_weight} kg (BMI {bmi:.1f})")
+    if st.button("上傳雲端"):
+        try:
+            with st.spinner('正在連線 Google 寫入資料...'):
+                save_data(input_date, input_height, input_weight, round(bmi, 1))
+            st.success(f"✅ 成功寫入！ ({input_date})")
+            # 強制清除快取，讓右邊的圖表馬上更新
+            st.cache_data.clear()
+        except Exception as e:
+            st.error(f"寫入失敗，請檢查權限或網路: {e}")
 
 # --- 右側：顯示區 ---
-if os.path.exists(FILE_NAME):
-    df = pd.read_csv(FILE_NAME)
+try:
+    df = load_data()
     
-    # 確保資料依照日期排序
-    df = df.sort_values(by='日期')
+    if not df.empty:
+        # 確保日期格式正確
+        df['日期'] = pd.to_datetime(df['日期']).dt.date
+        df = df.sort_values(by='日期')
 
-    # 取得最新一筆資料
-    latest_weight = df.iloc[-1]['體重']
-    
-    # 如果有 BMI 欄位就讀取，沒有就重算 (為了相容舊資料)
-    if 'BMI' in df.columns:
-        latest_bmi = df.iloc[-1]['BMI']
+        # 最新數據
+        latest = df.iloc[-1]
+        
+        col1, col2, col3 = st.columns(3)
+        col1.metric("最新體重", f"{latest['體重']} kg")
+        col2.metric("最新 BMI", f"{latest['BMI']}")
+        col3.metric("紀錄總筆數", f"{len(df)} 筆")
+
+        st.divider()
+
+        st.subheader("📊 體重趨勢")
+        st.line_chart(df.set_index('日期')['體重'])
+
+        with st.expander("查看 Google Sheet 原始資料"):
+            st.dataframe(df.sort_values(by='日期', ascending=False))
     else:
-        # 簡單防呆：如果舊資料沒存 BMI，這裡用目前的輸入暫代顯示
-        latest_bmi = latest_weight / ((input_height / 100) ** 2)
+        st.info("目前雲端表格是空的，快輸入第一筆資料吧！")
 
-    # --- 關鍵指標儀表板 ---
-    col1, col2, col3 = st.columns(3)
-    col1.metric("目前體重", f"{latest_weight} kg")
-    col2.metric("目前 BMI", f"{latest_bmi:.1f}")
-    
-    # 判斷 BMI 狀態
-    state = "正常"
-    if latest_bmi < 18.5: state = "過輕 🟦"
-    elif 18.5 <= latest_bmi < 24: state = "正常 🟩"
-    elif 24 <= latest_bmi < 27: state = "過重 🟧"
-    else: state = "肥胖 🟥"
-    col3.metric("健康狀態", state)
-
-    st.divider() # 分隔線
-
-    # --- 圖表區 ---
-    st.subheader("📊 體重趨勢圖")
-    st.line_chart(df.set_index('日期')['體重'])
-    
-    with st.expander("查看詳細數據表格"):
-        st.dataframe(df.sort_values(by='日期', ascending=False))
-else:
-    st.info("👈 請在左側輸入你的身高體重，開始第一筆紀錄！")
+except Exception as e:
+    st.warning("無法讀取資料，請確認：")
+    st.markdown("1. Streamlit Secrets 是否設定正確？")
+    st.markdown(f"2. Google Sheet 名稱是否叫 `{SHEET_NAME}`？")
+    st.markdown("3. 是否有把 Sheet 分享給機器人 Email？")
+    st.error(f"詳細錯誤訊息: {e}")
