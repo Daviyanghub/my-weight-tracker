@@ -159,17 +159,21 @@ with tab2:
                 # 使用 session_state 暫存結果
                 st.session_state['last_result'] = result
 
-    # 儲存按鈕
-    if 'last_result' in st.session_state:
-        res = st.session_state['last_result']
-        if st.button(f"📥 儲存：{res['food_name']}"):
-            now_time = datetime.now().strftime("%H:%M")
-            # 這裡呼叫新的儲存函式，多傳一個 fat
-            save_food_data(date.today(), now_time, res['food_name'], 
-                          res['calories'], res['protein'], res['carbs'], res.get('fat', 0))
-            
+# 顯示儲存按鈕 (獨立出來以免消失)
+if 'last_result' in st.session_state:
+    res = st.session_state['last_result']
+    if st.button(f"📥 儲存：{res['food_name']}"):
+        # 修正：強制設定時區為 台北時間 (GMT+8)
+        TAIPEI_TZ = pytz.timezone('Asia/Taipei') # <--- 新增
+        now_time = datetime.now(TAIPEI_TZ).strftime("%H:%M") # <--- 修改
+        
+        # 這裡呼叫儲存函式...
+        save_food_data(date.today(), now_time, res['food_name'], 
+                      res['calories'], res['protein'], res['carbs'], res.get('fat', 0))
+        # ... 後續程式碼不變 ...
             st.success(f"已儲存！ (含脂肪 {res.get('fat', 0)}g)")
             del st
+
 
 
 
