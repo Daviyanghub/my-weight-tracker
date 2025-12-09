@@ -78,11 +78,11 @@ def get_config():
             except ValueError:
                 config[key] = val
 
-    # 🔥🔥🔥 1/1 衝刺計畫：硬性預設值 (若 Google Sheet 沒設定，就用這個) 🔥🔥🔥
-    if 'target_weight' not in config: config['target_weight'] = 75.0  # 目標 75KG
-    if 'target_water' not in config: config['target_water'] = 3000    # 衝刺期需要多喝水代謝
-    if 'target_cal' not in config: config['target_cal'] = 1500        # 赤字底線
-    if 'target_protein' not in config: config['target_protein'] = 160 # 高蛋白保肌
+    # 🔥🔥🔥 1/1 衝刺計畫 (168 斷食版) 預設值 🔥🔥🔥
+    if 'target_weight' not in config: config['target_weight'] = 75.0
+    if 'target_water' not in config: config['target_water'] = 3000
+    if 'target_cal' not in config: config['target_cal'] = 1500
+    if 'target_protein' not in config: config['target_protein'] = 160
     
     return config
 
@@ -100,13 +100,13 @@ def analyze_food_with_ai(image_data, text_input):
     current_time_str = now_dt.strftime("%Y-%m-%d %H:%M")
     
     prompt = f"""
-    你是一個專業營養師，正在協助使用者進行「限時減重衝刺」。
+    你是一個專業營養師，正在協助使用者進行「168斷食減重衝刺」。
     現在的時間是：{current_time_str} (GMT+8 台北時間)。
     請分析這份飲食，並根據使用者的文字描述推斷「進食時間」。
     
     任務：
     1. 估算營養：熱量(kcal), 蛋白質(g), 碳水(g), 脂肪(g)。
-    2. 推斷時間：如果使用者說 "早上8點吃的"，請推算 date (YYYY-MM-DD) 和 time (HH:MM)。
+    2. 推斷時間：如果使用者說 "剛剛吃的"，請推算 date (YYYY-MM-DD) 和 time (HH:MM)。
     
     請直接回傳標準 JSON 格式：
     {{
@@ -196,7 +196,6 @@ def calculate_daily_summary(target_date):
     target_date_str = str(target_date)
     totals = {'cal': 0, 'prot': 0, 'carb': 0, 'fat': 0, 'water': 0}
     
-    # 1. 計算食物
     try:
         df_food = load_data(FOOD_SHEET_NAME)
         if not df_food.empty and '日期' in df_food.columns:
@@ -206,7 +205,6 @@ def calculate_daily_summary(target_date):
                     totals[key] = pd.to_numeric(df_target[col], errors='coerce').fillna(0).sum()
     except Exception: pass
 
-    # 2. 計算飲水
     try:
         df_water = load_data(WATER_SHEET_NAME)
         if not df_water.empty and '日期' in df_water.columns:
@@ -220,9 +218,8 @@ def calculate_daily_summary(target_date):
     return totals
 
 def calculate_daily_macros_goal(daily_stats, config):
-    """計算並回傳今日營養目標達成狀況及建議 (1/1 衝刺版)"""
+    """計算並回傳今日營養目標達成狀況及建議 (168 衝刺版)"""
     
-    # 讀取設定 (若無設定則使用衝刺預設值)
     target_cal = config.get('target_cal', 1500)
     target_protein = config.get('target_protein', 160)
     
@@ -230,7 +227,6 @@ def calculate_daily_macros_goal(daily_stats, config):
     cal_percent = (daily_stats['cal'] / target_cal) * 100 if target_cal > 0 else 0
     prot_percent = (daily_stats['prot'] / target_protein) * 100 if target_protein > 0 else 0
     
-    # 宏量營養素數據
     total_g = daily_stats['prot'] + daily_stats['carb'] + daily_stats['fat']
     macros_data = pd.DataFrame({
         'Nutrient': ['蛋白質', '碳水化合物', '脂肪'],
@@ -238,24 +234,25 @@ def calculate_daily_macros_goal(daily_stats, config):
     })
     macros_data['Percentage'] = (macros_data['Grams'] / total_g) * 100 if total_g > 0 else 0
     
-    # 🔥🔥🔥 衝刺警示系統 🔥🔥🔥
+    # 🔥🔥🔥 衝刺警示系統 (168 修正版) 🔥🔥🔥
     alerts = []
     
-    # 1. 熱量控制 (嚴格)
+    # 1. 熱量控制
     if daily_stats['cal'] > target_cal:
         excess = daily_stats['cal'] - target_cal
-        alerts.append(("🔥 熱量超標警報", f"已超出 {excess} kcal！請立即停止進食，或去散步 40 分鐘抵銷。", "red"))
+        alerts.append(("🔥 熱量超標", f"已超出 {excess} kcal！請立即停止進食，喝水撐過剩下的斷食時間。", "red"))
     elif daily_stats['cal'] < target_cal * 0.5:
-        alerts.append(("⚡ 熱量過低", "吃太少會掉肌肉！請補充蛋白質。", "orange"))
+        alerts.append(("⚡ 熱量過低", "吃太少會掉肌肉！請在進食窗口內盡快補充足夠熱量。", "orange"))
         
-    # 2. 蛋白質檢核 (必須達標)
+    # 2. 蛋白質檢核 (修正建議)
     if daily_stats['prot'] < target_protein:
         missing_prot = target_protein - daily_stats['prot']
-        alerts.append(("🥩 蛋白質不足", f"距離目標還差 {missing_prot:.0f}g，這是保住肌肉的關鍵！睡前喝杯乳清或吃顆蛋。", "orange"))
+        # ⚠️ 修正：提醒在進食窗口結束前吃完
+        alerts.append(("🥩 蛋白質不足", f"還差 {missing_prot:.0f}g！請務必在「進食窗口結束前」補足，避免肌肉流失。", "orange"))
         
-    # 3. 碳水檢核 (低碳建議)
-    if daily_stats['carb'] > 120: # 衝刺期建議低於 120g
-        alerts.append(("🍚 碳水偏高", "今日碳水已超過 120g，這會影響排水速度。下一餐請避開澱粉。", "orange"))
+    # 3. 碳水檢核
+    if daily_stats['carb'] > 120:
+        alerts.append(("🍚 碳水偏高", "今日碳水已超過 120g，會影響斷食燃脂效率。下一餐請只吃肉和菜。", "orange"))
     
     return {
         'cal_percent': cal_percent,
@@ -265,10 +262,9 @@ def calculate_daily_macros_goal(daily_stats, config):
     }
 
 # ================= 介面開始 =================
-st.set_page_config(layout="wide", page_title="健康管家 AI - 1/1 衝刺模式")
-st.title('🚀 1/1 減重衝刺戰情室')
+st.set_page_config(layout="wide", page_title="健康管家 AI - 168 衝刺版")
+st.title('🚀 1/1 減重衝刺戰情室 (168 斷食)')
 
-# 讀取設定
 config = get_config()
 target_water = config.get('target_water', 3000)
 target_weight = config.get('target_weight', 75.0)
@@ -287,7 +283,6 @@ with st.spinner(f"正在讀取 {view_date} 資料..."):
     daily_stats = calculate_daily_summary(view_date)
     analysis = calculate_daily_macros_goal(daily_stats, config)
 
-# 飲水 Delta (強調差距)
 water_delta = f"目標 {target_water}"
 if daily_stats['water'] < target_water:
     water_delta = f"⚠️ 還差 {target_water - daily_stats['water']} ml"
@@ -296,7 +291,7 @@ else:
 
 col1, col2, col3, col4, col5 = st.columns(5)
 col1.metric("💧 飲水", f"{int(daily_stats['water'])} ml", delta=water_delta)
-col2.metric("🔥 熱量", f"{int(daily_stats['cal'])} kcal", delta=f"上限 {target_cal}", delta_color="inverse") # 超過變紅
+col2.metric("🔥 熱量", f"{int(daily_stats['cal'])} kcal", delta=f"上限 {target_cal}", delta_color="inverse")
 col3.metric("🥩 蛋白質", f"{int(daily_stats['prot'])} g", delta=f"目標 {target_protein}")
 col4.metric("🍚 碳水", f"{int(daily_stats['carb'])} g", delta="建議 < 100")
 col5.metric("🥑 脂肪", f"{int(daily_stats['fat'])} g")
@@ -312,30 +307,29 @@ if analysis['alerts']:
         else:
             st.warning(f"⚠️ {alert}: {message}")
 else:
-    if daily_stats['cal'] > 500: # 確保有輸入資料才顯示
+    if daily_stats['cal'] > 500:
         st.success("🌟 完美！今日飲食控制得非常好，請繼續保持！")
 
 col_p1, col_p2, col_p3 = st.columns(3)
 
-# 1. 蛋白質達成率 (Bar)
+# 1. 蛋白質達成率
 col_p1.metric("蛋白質達成率", f"{analysis['prot_percent']:.1f} %")
 col_p1.progress(min(analysis['prot_percent'] / 100, 1.0))
 
-# 2. 熱量消耗額度 (Bar) - 剩餘額度概念
+# 2. 熱量消耗額度
 calories_left = max(target_cal - daily_stats['cal'], 0)
 col_p2.metric("今日剩餘熱量額度", f"{int(calories_left)} kcal")
-# 如果超標，進度條全紅
 prog_val = min(analysis['cal_percent'] / 100, 1.0)
 col_p2.progress(prog_val)
 
-# 3. 營養比例 (Pie Chart)
+# 3. 營養比例
 if not analysis['macros_data'].empty and analysis['macros_data']['Grams'].sum() > 0:
     chart = alt.Chart(analysis['macros_data']).mark_arc(outerRadius=100).encode(
         theta=alt.Theta(field="Grams", type="quantitative"),
         color=alt.Color(field="Nutrient", type="nominal", scale=alt.Scale(domain=['蛋白質', '碳水化合物', '脂肪'], range=['#FF4B4B', '#3186CC', '#FFAA00'])),
         order=alt.Order(field="Percentage", sort="descending"),
         tooltip=["Nutrient", "Grams", alt.Tooltip("Percentage", format=".1f")]
-    ).properties(title="營養素比例 (目標: 高蛋白)")
+    ).properties(title="營養素比例")
     col_p3.altair_chart(chart, use_container_width=True)
 else:
     col_p3.info("尚無數據")
@@ -368,20 +362,13 @@ with tab1:
         df_weight = load_data(WEIGHT_SHEET_NAME)
         if not df_weight.empty and '體重' in df_weight.columns:
             df_weight['日期'] = pd.to_datetime(df_weight['日期'])
-            
-            # 建立圖表：加上目前體重與目標體重的明顯對比
             chart_base = alt.Chart(df_weight).encode(
                 x=alt.X('日期:T', title="日期"), 
                 y=alt.Y('體重:Q', title="體重 (kg)", scale=alt.Scale(zero=False))
             )
             line = chart_base.mark_line(point=True, color='#29B5E8').encode(tooltip=['日期:T', '體重:Q'])
-            
-            # 目標線 (紅色虛線)
             goal_line = alt.Chart(pd.DataFrame({'目標體重': [target_weight]})).mark_rule(color='#FF4B4B', strokeDash=[5, 5], size=2).encode(y='目標體重')
-            
-            # 加上文字標籤顯示目標
             text = alt.Chart(pd.DataFrame({'y': [target_weight], 'text': [f'目標 {target_weight}kg']})).mark_text(align='left', dx=5, dy=-5, color='#FF4B4B').encode(y='y', text='text')
-
             st.altair_chart(line + goal_line + text, use_container_width=True)
             st.dataframe(df_weight.sort_values(by='日期', ascending=False).head(50), use_container_width=True)
         else:
@@ -389,7 +376,7 @@ with tab1:
 
 # --- Tab 2: 飲食 ---
 with tab2:
-    st.info("💡 衝刺提示：少吃澱粉，多吃肉與菜！")
+    st.info("💡 168 斷食提示：請確保所有進食都在 8 小時窗口內完成！")
     col_f1, col_f2 = st.columns([1, 2])
     with col_f1:
         uploaded_file = st.file_uploader("📸 上傳食物照片", type=["jpg", "png", "jpeg"])
@@ -412,7 +399,6 @@ with tab2:
             
             default_date = datetime.now(TAIPEI_TZ).date()
             default_time = datetime.now(TAIPEI_TZ).time()
-            
             if res.get('date'):
                 try: default_date = datetime.strptime(res['date'], "%Y-%m-%d").date()
                 except: pass
@@ -445,11 +431,10 @@ with tab2:
 
 # --- Tab 3: 飲水 ---
 with tab3:
-    st.subheader("💧 飲水紀錄 (代謝關鍵)")
+    st.subheader("💧 飲水紀錄")
     b1, b2, b3, b4 = st.columns(4)
     add_val = 0
-    
-    st.markdown(f"**今日目標:** {target_water} ml (喝水能提升代謝！)")
+    st.markdown(f"**今日目標:** {target_water} ml (喝水不破壞斷食，多喝！)")
     
     if b1.button("+ 100ml"): add_val = 100
     if b2.button("+ 300ml"): add_val = 300
@@ -473,8 +458,6 @@ with tab3:
 # --- Tab 4: 設定 ---
 with tab4:
     st.subheader("⚙️ 衝刺計畫設定")
-    st.markdown("⚠️ 這些數值是根據你的 1/1 衝刺計畫計算的，建議不要隨意調低蛋白質目標。")
-    
     curr_w_target = float(target_weight)
     curr_water_target = int(target_water)
     curr_cal_target = int(target_cal)
@@ -496,4 +479,4 @@ with tab4:
         save_config('target_water', new_target_water)
         save_config('target_cal', new_target_cal)
         save_config('target_protein', new_target_protein)
-        st.success("✅ 設定已更新！加油！")
+        st.success("✅ 設定已更新！")
