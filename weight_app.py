@@ -31,10 +31,15 @@ else:
     st.error("⚠️ 尚未設定 Gemini API Key！請去 Secrets 貼上。")
 
 def analyze_food_with_ai(image_data, text_input):
-    """叫 AI 幫我們看照片 + 讀文字 (除錯版)"""
-    model = genai.GenerativeModel('gemini-1.5-flash') 
+    """
+    雙模型切換版：
+    - 有圖：使用 gemini-pro-vision
+    - 沒圖：使用 gemini-pro
+    這樣就不需要依賴最新版套件，解決 404 問題。
+    """
     
-    prompt = """
+    # 準備 Prompt (你的指令)
+    base_prompt = """
     你是一個專業營養師。請分析這份飲食。
     請估算它的：1.熱量(大卡), 2.蛋白質(克), 3.碳水化合物(克)。
     
@@ -48,27 +53,32 @@ def analyze_food_with_ai(image_data, text_input):
     """
     
     if text_input:
-        prompt += f"\n使用者補充說明：{text_input}"
+        base_prompt += f"\n使用者補充說明：{text_input}"
 
-    inputs = [prompt]
-    if image_data:
-        inputs.append(image_data)
-        
     try:
-        # 這裡加了除錯訊息，讓我們知道進度到哪了
-        st.toast("📡 正在傳送資料給 Google AI...", icon="🤖")
-        response = model.generate_content(inputs)
+        st.toast("📡 呼叫 AI 營養師中...", icon="🤖")
         
+        # --- 關鍵修改：自動切換模型 ---
+        if image_data:
+            # 情況 A：有照片 -> 用視覺模型 (gemini-pro-vision)
+            # 注意：舊版模型要求圖片放列表前面
+            model = genai.GenerativeModel('gemini-pro-vision')
+            inputs = [base_prompt, image_data]
+            response = model.generate_content(inputs)
+        else:
+            # 情況 B：純文字 -> 用文字模型 (gemini-pro)
+            model = genai.GenerativeModel('gemini-pro')
+            response = model.generate_content(base_prompt)
+            
         st.toast("✅ 收到 AI 回應！正在解析...", icon="✨")
-        # 印出原始回應，萬一格式錯了我們看得到
         print(f"DEBUG AI Response: {response.text}") 
         
         clean_json = response.text.replace('```json', '').replace('```', '').strip()
         return eval(clean_json)
+
     except Exception as e:
-        # ⚠️ 這裡是最重要的！如果有錯，直接印在螢幕上給你看
         st.error(f"❌ 發生錯誤：{e}")
-        st.write("錯誤原因可能為：API Key 過期、圖片格式不支援、或是 AI 回傳了奇怪的格式。")
+        st.info("如果顯示 '404'，代表 AI 暫時連不上，請稍後再試。")
         return None
 
 # --- 3. 讀寫資料函式 ---
@@ -176,5 +186,6 @@ with tab2:
     except:
 
         st.write("目前還沒有飲食資料")
+
 
 
