@@ -3,10 +3,11 @@ import pandas as pd
 import gspread
 import google.generativeai as genai
 from datetime import datetime, date
+from PIL import Image
 
 # --- 設定區 ---
 SHEET_ID = 'My Weight Data'  # 你的試算表名稱
-WEIGHT_SHEET_NAME = '工作表1' # ⚠️注意：如果你改過體重分頁的名字，請這裡也要改 (預設通常是 "工作表1" 或 "Sheet1")
+WEIGHT_SHEET_NAME = '工作表1' # ⚠️注意：如果你的體重分頁叫 Sheet1，請改這裡
 FOOD_SHEET_NAME = 'Food Log'
 
 # --- 1. 連接 Google Sheets ---
@@ -18,7 +19,6 @@ def get_google_sheet(sheet_name):
     try:
         return sh.worksheet(sheet_name)
     except gspread.WorksheetNotFound:
-        # 如果找不到分頁，就自動創一個 (防呆機制)
         new_sheet = sh.add_worksheet(title=sheet_name, rows=1000, cols=6)
         if sheet_name == FOOD_SHEET_NAME:
             new_sheet.append_row(['日期', '時間', '食物名稱', '熱量', '蛋白質', '碳水'])
@@ -30,28 +30,38 @@ if "gemini_api_key" in st.secrets:
 else:
     st.error("⚠️ 尚未設定 Gemini API Key！請去 Secrets 貼上。")
 
-def analyze_food_with_ai(text_input):
-    """叫 AI 幫我們估算營養素"""
-    model = genai.GenerativeModel('gemini-1.5-flash') # 使用最新的輕量模型，速度快
+def analyze_food_with_ai(image_data, text_input):
+    """叫 AI 幫我們看照片 + 讀文字"""
+    model = genai.GenerativeModel('gemini-1.5-flash') 
     
-    prompt = f"""
-    你是一個專業營養師。請分析這段飲食描述："{text_input}"。
+    # 組合給 AI 的指令
+    prompt = """
+    你是一個專業營養師。請分析這份飲食。
+    請依據圖片內容（如果有）以及文字描述（如果有）進行綜合評估。
+    
     請估算它的：1.熱量(大卡), 2.蛋白質(克), 3.碳水化合物(克)。
     
     請直接回傳一個 JSON 格式，不要有markdown標記，格式如下：
-    {{
-        "food_name": "食物簡稱",
+    {
+        "food_name": "食物簡稱(例如: 雞腿便當)",
         "calories": 數字,
         "protein": 數字,
         "carbs": 數字
-    }}
-    如果無法辨識或不是食物，所有數字回傳 0。
+    }
     """
+    
+    if text_input:
+        prompt += f"\n使用者補充說明：{text_input}"
+
+    # 準備傳送給 AI 的資料包
+    inputs = [prompt]
+    if image_data:
+        inputs.append(image_data)
+        
     try:
-        response = model.generate_content(prompt)
-        # 清理一下 AI 回傳的文字，確保是純 JSON
+        response = model.generate_content(inputs)
         clean_json = response.text.replace('```json', '').replace('```', '').strip()
-        return eval(clean_json) # 把文字變成 Python 字典
+        return eval(clean_json)
     except Exception as e:
         return None
 
@@ -72,8 +82,7 @@ def load_data(sheet_name):
 # ================= 介面開始 =================
 st.title('🥗 健康管家 & 體重追蹤')
 
-# 建立兩個分頁
-tab1, tab2 = st.tabs(["⚖️ 體重紀錄", "🍎 飲食紀錄 (AI辨識)"])
+tab1, tab2 = st.tabs(["⚖️ 體重紀錄", "📸 飲食紀錄 (拍照/文字)"])
 
 # --- 分頁 1: 體重 ---
 with tab1:
@@ -92,7 +101,7 @@ with tab1:
             with st.spinner('上傳中...'):
                 save_weight_data(w_date, w_height, w_weight, round(bmi, 1))
             st.success("✅ 體重已紀錄！")
-            st.cache_data.clear() # 清除快取以顯示最新資料
+            st.cache_data.clear()
 
     with col2:
         try:
@@ -100,45 +109,59 @@ with tab1:
             if not df_weight.empty:
                 st.subheader("📊 體重趨勢")
                 st.line_chart(df_weight.set_index('日期')['體重'])
-                with st.expander("詳細數據"):
-                    st.dataframe(df_weight.sort_values('日期', ascending=False))
         except Exception as e:
             st.info("👈 尚無資料，請先輸入第一筆！")
 
-# --- 分頁 2: 飲食 (AI 功能) ---
+# --- 分頁 2: 飲食 (AI 視覺版) ---
 with tab2:
-    st.info("💡 試試輸入：『早餐吃了一個火腿蛋吐司和大冰奶』")
+    st.info("💡 拍張照，或者打字，AI 都能幫你算！")
     
-    food_input = st.text_input("今天吃了什麼？(支援中文/語音輸入轉文字)", placeholder="例如：排骨便當去飯、一杯無糖綠茶")
+    # 1. 圖片上傳區
+    uploaded_file = st.file_uploader("📸 上傳食物照片", type=["jpg", "png", "jpeg"])
+    image = None
+    if uploaded_file is not None:
+        image = Image.open(uploaded_file)
+        st.image(image, caption='預覽照片', use_container_width=True)
     
+    # 2. 文字補充區
+    food_input = st.text_input("文字補充 (例如：飯只吃一半)", placeholder="也可以不傳照片，直接打字喔！")
+    
+    # 3. 按鈕
     if st.button("🍱 AI 幫我算熱量"):
-        if food_input:
-            with st.spinner('AI 營養師正在分析中...'):
-                result = analyze_food_with_ai(food_input)
+        if uploaded_file or food_input:
+            with st.spinner('AI 正在看照片分析中...'):
+                result = analyze_food_with_ai(image, food_input)
             
-            if result and result['calories'] > 0:
-                # 顯示 AI 分析結果卡片
+            if result and result.get('calories', 0) > 0:
+                # 顯示結果
                 c1, c2, c3 = st.columns(3)
                 c1.metric("🔥 熱量", f"{result['calories']} kcal")
                 c2.metric("🥩 蛋白質", f"{result['protein']} g")
                 c3.metric("🍚 碳水", f"{result['carbs']} g")
                 
-                # 確認按鈕
                 st.write(f"**辨識結果：** {result['food_name']}")
-                if st.button("✅ 確認並儲存到雲端"):
-                    now_time = datetime.now().strftime("%H:%M")
-                    save_food_data(date.today(), now_time, result['food_name'], 
-                                  result['calories'], result['protein'], result['carbs'])
-                    st.success(f"已紀錄：{result['food_name']} ({result['calories']} kcal)")
-                    st.cache_data.clear()
-            else:
-                st.error("AI 看不懂這是什麼食物，請換個說法試試看！(例如：1碗白飯)")
-        else:
-            st.warning("請先輸入文字喔！")
+                
+                # 儲存按鈕
+                if st.button("✅ 確認並儲存"): # 注意：Streamlit 巢狀按鈕有時需特別處理，這裡簡化邏輯
+                    # 為了避免按鈕重置問題，這裡使用直接寫入邏輯
+                    pass 
+                
+                # 這裡使用 session_state 來處理儲存，體驗會比較好
+                st.session_state['last_result'] = result
+
+    # 顯示儲存按鈕 (獨立出來以免消失)
+    if 'last_result' in st.session_state:
+        res = st.session_state['last_result']
+        if st.button(f"📥 儲存：{res['food_name']}"):
+            now_time = datetime.now().strftime("%H:%M")
+            save_food_data(date.today(), now_time, res['food_name'], 
+                          res['calories'], res['protein'], res['carbs'])
+            st.success(f"已儲存！ ({res['calories']} kcal)")
+            del st.session_state['last_result'] # 存完清除
+            st.cache_data.clear()
 
     st.divider()
     
-    # 顯示飲食紀錄表
     try:
         df_food = load_data(FOOD_SHEET_NAME)
         if not df_food.empty:
