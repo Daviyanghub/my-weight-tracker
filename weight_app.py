@@ -7,7 +7,7 @@ from PIL import Image
 
 # --- 設定區 ---
 SHEET_ID = 'My Weight Data'  # 你的試算表名稱
-WEIGHT_SHEET_NAME = '工作表1' # ⚠️注意：如果你的體重分頁叫 Sheet1，請改這裡
+WEIGHT_SHEET_NAME = '工作表1' # 請確認這跟你的體重分頁名稱一樣
 FOOD_SHEET_NAME = 'Food Log'
 
 # --- 1. 連接 Google Sheets ---
@@ -19,9 +19,12 @@ def get_google_sheet(sheet_name):
     try:
         return sh.worksheet(sheet_name)
     except gspread.WorksheetNotFound:
-        new_sheet = sh.add_worksheet(title=sheet_name, rows=1000, cols=6)
+        # 如果找不到分頁，自動創一個 (現在多加了脂肪欄位)
         if sheet_name == FOOD_SHEET_NAME:
-            new_sheet.append_row(['日期', '時間', '食物名稱', '熱量', '蛋白質', '碳水'])
+            new_sheet = sh.add_worksheet(title=sheet_name, rows=1000, cols=7) # 改成 7 欄
+            new_sheet.append_row(['日期', '時間', '食物名稱', '熱量', '蛋白質', '碳水', '脂肪'])
+        else:
+            new_sheet = sh.add_worksheet(title=sheet_name, rows=1000, cols=4)
         return new_sheet
 
 # --- 2. 設定 Google AI (Gemini) ---
@@ -32,23 +35,28 @@ else:
 
 def analyze_food_with_ai(image_data, text_input):
     """
-    最終修復版：
-    1. 改回使用 gemini-1.5-flash (這是 2025 年的主流模型)。
-    2. 增加錯誤診斷：如果報錯，會告訴你到底發生什麼事。
+    VIP 升級版：使用 gemini-2.5-flash
+    新增功能：回傳「脂肪」數據
     """
-    # 使用正確的 1.5 Flash 模型
-    model_name = 'gemini-1.5-flash'
+    # 使用你測試成功的 2.5 Flash
+    model_name = 'gemini-2.5-flash'
     model = genai.GenerativeModel(model_name)
     
     prompt = """
     你是一個專業營養師。請分析這份飲食。
-    請估算它的：1.熱量(大卡), 2.蛋白質(克), 3.碳水化合物(克)。
+    請估算它的：
+    1. 熱量(大卡)
+    2. 蛋白質(克)
+    3. 碳水化合物(克)
+    4. 脂肪(克)  <-- 新增這個
+    
     請直接回傳一個 JSON 格式，不要有markdown標記，格式如下：
     {
         "food_name": "食物簡稱",
         "calories": 數字,
         "protein": 數字,
-        "carbs": 數字
+        "carbs": 數字,
+        "fat": 數字
     }
     """
     if text_input:
@@ -59,41 +67,27 @@ def analyze_food_with_ai(image_data, text_input):
         inputs.append(image_data)
         
     try:
-        st.toast(f"📡 呼叫 {model_name} 中...", icon="🤖")
+        st.toast(f"📡 呼叫 {model_name} 分析營養中...", icon="🚀")
         response = model.generate_content(inputs)
-        st.toast("✅ AI 成功回應！", icon="✨")
+        st.toast("✅ 分析完成！", icon="✨")
         
         clean_json = response.text.replace('```json', '').replace('```', '').strip()
         return eval(clean_json)
 
     except Exception as e:
         st.error(f"❌ 發生錯誤：{e}")
-        
-        # --- 這是救命的診斷功能 ---
-        with st.expander("🕵️‍♂️ 點這裡進行故障排除 (列出可用模型)"):
-            st.write("正在查詢您的 API Key 能存取哪些模型...")
-            try:
-                available_models = [m.name for m in genai.list_models()]
-                st.write("✅ 您的帳號可用模型清單：")
-                st.json(available_models)
-                
-                if f"models/{model_name}" not in available_models:
-                    st.warning(f"⚠️ 警告：清單裡沒有 {model_name}，可能是 API 權限沒開？")
-                    st.markdown("👉 請去 Google Cloud Console 搜尋 **'Generative Language API'** 並啟用它。")
-            except Exception as list_e:
-                st.error(f"無法列出模型，代表 API Key 權限完全被擋住了。錯誤：{list_e}")
-                st.markdown("👉 請檢查 **Google Cloud Console** 是否有啟用 **Generative Language API**。")
-        
         return None
-        
+
 # --- 3. 讀寫資料函式 ---
 def save_weight_data(d, h, w, b):
     ws = get_google_sheet(WEIGHT_SHEET_NAME)
     ws.append_row([str(d), h, w, b])
 
-def save_food_data(date_str, time_str, food, cal, prot, carb):
+# 新增 fat 參數
+def save_food_data(date_str, time_str, food, cal, prot, carb, fat):
     ws = get_google_sheet(FOOD_SHEET_NAME)
-    ws.append_row([str(date_str), str(time_str), food, cal, prot, carb])
+    # 寫入 7 個欄位
+    ws.append_row([str(date_str), str(time_str), food, cal, prot, carb, fat])
 
 def load_data(sheet_name):
     ws = get_google_sheet(sheet_name)
@@ -103,7 +97,7 @@ def load_data(sheet_name):
 # ================= 介面開始 =================
 st.title('🥗 健康管家 & 體重追蹤')
 
-tab1, tab2 = st.tabs(["⚖️ 體重紀錄", "📸 飲食紀錄 (拍照/文字)"])
+tab1, tab2 = st.tabs(["⚖️ 體重紀錄", "📸 飲食紀錄 (含脂肪)"])
 
 # --- 分頁 1: 體重 ---
 with tab1:
@@ -133,65 +127,48 @@ with tab1:
         except Exception as e:
             st.info("👈 尚無資料，請先輸入第一筆！")
 
-# --- 分頁 2: 飲食 (AI 視覺版) ---
+# --- 分頁 2: 飲食 (四欄位版) ---
 with tab2:
-    st.info("💡 拍張照，或者打字，AI 都能幫你算！")
+    st.info("💡 拍張照，AI 會幫你算 熱量、蛋白質、碳水 和 脂肪！")
     
-    # 1. 圖片上傳區
     uploaded_file = st.file_uploader("📸 上傳食物照片", type=["jpg", "png", "jpeg"])
     image = None
     if uploaded_file is not None:
         image = Image.open(uploaded_file)
         st.image(image, caption='預覽照片', use_container_width=True)
     
-    # 2. 文字補充區
     food_input = st.text_input("文字補充 (例如：飯只吃一半)", placeholder="也可以不傳照片，直接打字喔！")
     
-    # 3. 按鈕
     if st.button("🍱 AI 幫我算熱量"):
         if uploaded_file or food_input:
-            with st.spinner('AI 正在看照片分析中...'):
+            with st.spinner('AI 正在分析...'):
                 result = analyze_food_with_ai(image, food_input)
             
             if result and result.get('calories', 0) > 0:
-                # 顯示結果
-                c1, c2, c3 = st.columns(3)
+                # 顯示結果 (變成 4 個圈圈)
+                c1, c2, c3, c4 = st.columns(4)
                 c1.metric("🔥 熱量", f"{result['calories']} kcal")
                 c2.metric("🥩 蛋白質", f"{result['protein']} g")
                 c3.metric("🍚 碳水", f"{result['carbs']} g")
+                # 新增脂肪顯示
+                c4.metric("🥑 脂肪", f"{result.get('fat', 0)} g")
                 
                 st.write(f"**辨識結果：** {result['food_name']}")
                 
-                # 儲存按鈕
-                if st.button("✅ 確認並儲存"): # 注意：Streamlit 巢狀按鈕有時需特別處理，這裡簡化邏輯
-                    # 為了避免按鈕重置問題，這裡使用直接寫入邏輯
-                    pass 
-                
-                # 這裡使用 session_state 來處理儲存，體驗會比較好
+                # 使用 session_state 暫存結果
                 st.session_state['last_result'] = result
 
-    # 顯示儲存按鈕 (獨立出來以免消失)
+    # 儲存按鈕
     if 'last_result' in st.session_state:
         res = st.session_state['last_result']
         if st.button(f"📥 儲存：{res['food_name']}"):
             now_time = datetime.now().strftime("%H:%M")
+            # 這裡呼叫新的儲存函式，多傳一個 fat
             save_food_data(date.today(), now_time, res['food_name'], 
-                          res['calories'], res['protein'], res['carbs'])
-            st.success(f"已儲存！ ({res['calories']} kcal)")
-            del st.session_state['last_result'] # 存完清除
-            st.cache_data.clear()
-
-    st.divider()
-    
-    try:
-        df_food = load_data(FOOD_SHEET_NAME)
-        if not df_food.empty:
-            st.subheader("📝 近期飲食紀錄")
-            st.dataframe(df_food.sort_values('日期', ascending=False))
-    except:
-
-        st.write("目前還沒有飲食資料")
-
+                          res['calories'], res['protein'], res['carbs'], res.get('fat', 0))
+            
+            st.success(f"已儲存！ (含脂肪 {res.get('fat', 0)}g)")
+            del st
 
 
 
