@@ -2,9 +2,9 @@ import streamlit as st
 import pandas as pd
 import gspread
 import google.generativeai as genai
-from datetime import datetime, date, timezone # <--- 修正這行
+from datetime import datetime, date
 from PIL import Image
-import pytz # <--- 新增這行
+import pytz 
 
 # --- 設定區 ---
 SHEET_ID = 'My Weight Data'  # 你的試算表名稱
@@ -164,16 +164,18 @@ if 'last_result' in st.session_state:
     res = st.session_state['last_result']
     if st.button(f"📥 儲存：{res['food_name']}"):
         # 修正：強制設定時區為 台北時間 (GMT+8)
-        TAIPEI_TZ = pytz.timezone('Asia/Taipei') # <--- 新增
-        now_time = datetime.now(TAIPEI_TZ).strftime("%H:%M") # <--- 修改
+        TAIPEI_TZ = pytz.timezone('Asia/Taipei')
+        now_time = datetime.now(TAIPEI_TZ).strftime("%H:%M")
         
-        # 這裡呼叫儲存函式...
+        # 這裡呼叫儲存函式
         save_food_data(date.today(), now_time, res['food_name'], 
-                      res['calories'], res['protein'], res['carbs'], res.get('fat', 0))
-        # ... 後續程式碼不變 ...
-            st.success(f"已儲存！ (含脂肪 {res.get('fat', 0)}g)")
-            del st
-
+                       res['calories'], res['protein'], res['carbs'], res.get('fat', 0))
+        
+        # --- 這裡修正了縮排與語法錯誤 ---
+        st.success(f"已儲存！ (含脂肪 {res.get('fat', 0)}g)")
+        
+        # 刪除暫存狀態，讓按鈕消失避免重複按
+        del st.session_state['last_result']
 
 
 
