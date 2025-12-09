@@ -3,3 +3,4 @@ pandas
 gspread
 google-generativeai>=0.7.2
 Pillow
+pytz
