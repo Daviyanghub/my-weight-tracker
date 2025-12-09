@@ -8,7 +8,7 @@ import pytz
 
 # --- 設定區 ---
 SHEET_ID = 'My Weight Data' 
-WEIGHT_SHEET_NAME = 'Weight Log' # <--- 已更名為 Weight Log
+WEIGHT_SHEET_NAME = 'Weight Log'
 FOOD_SHEET_NAME = 'Food Log'
 WATER_SHEET_NAME = 'Water Log' 
 
@@ -31,7 +31,7 @@ def get_google_sheet(sheet_name):
         elif sheet_name == WATER_SHEET_NAME:
             new_sheet = sh.add_worksheet(title=sheet_name, rows=1000, cols=3)
             new_sheet.append_row(['日期', '時間', '水量(ml)'])
-        elif sheet_name == WEIGHT_SHEET_NAME: # <--- 新增：Weight Log 自動建立邏輯
+        elif sheet_name == WEIGHT_SHEET_NAME:
             new_sheet = sh.add_worksheet(title=sheet_name, rows=1000, cols=4)
             new_sheet.append_row(['日期', '身高', '體重', 'BMI'])
         else:
@@ -108,24 +108,28 @@ def load_data(sheet_name):
     records = ws.get_all_records()
     return pd.DataFrame(records)
 
-def calculate_daily_summary():
-    """計算今天的總營養攝取 (依據台北時間)"""
-    # 取得台北時間的「今天」日期字串
-    today_str = str(datetime.now(TAIPEI_TZ).date())
+def calculate_daily_summary(target_date):
+    """
+    計算「指定日期」的總營養攝取
+    target_date: datetime.date 物件
+    """
+    target_date_str = str(target_date)
     
     df_food = load_data(FOOD_SHEET_NAME)
     totals = {'cal': 0, 'prot': 0, 'carb': 0, 'fat': 0, 'water': 0}
     
     if not df_food.empty:
-        df_today = df_food[df_food['日期'].astype(str) == today_str]
+        # 篩選出 target_date 那一天的資料
+        df_target = df_food[df_food['日期'].astype(str) == target_date_str]
         for col, key in [('熱量', 'cal'), ('蛋白質', 'prot'), ('碳水', 'carb'), ('脂肪', 'fat')]:
-            if col in df_today.columns:
-                totals[key] = pd.to_numeric(df_today[col], errors='coerce').fillna(0).sum()
+            if col in df_target.columns:
+                totals[key] = pd.to_numeric(df_target[col], errors='coerce').fillna(0).sum()
 
     df_water = load_data(WATER_SHEET_NAME)
     if not df_water.empty:
-        df_today_water = df_water[df_water['日期'].astype(str) == today_str]
-        totals['water'] = pd.to_numeric(df_today_water['水量(ml)'], errors='coerce').fillna(0).sum()
+        # 篩選出 target_date 那一天的資料
+        df_target_water = df_water[df_water['日期'].astype(str) == target_date_str]
+        totals['water'] = pd.to_numeric(df_target_water['水量(ml)'], errors='coerce').fillna(0).sum()
         
     return totals
 
@@ -133,12 +137,22 @@ def calculate_daily_summary():
 st.title('🥗 健康管家 AI')
 
 # --- 儀表板 ---
-st.markdown("### 📅 今日攝取總覽")
-with st.spinner("讀取資料中..."):
-    daily_stats = calculate_daily_summary()
+st.markdown("### 📅 每日攝取總覽")
+
+# [修改] 增加日期選擇器
+col_date, col_empty = st.columns([1, 2])
+with col_date:
+    # 預設為台北時間的今天
+    default_today = datetime.now(TAIPEI_TZ).date()
+    view_date = st.date_input("🔍 選擇檢視日期", default_today)
+
+with st.spinner(f"正在讀取 {view_date} 的資料..."):
+    # [修改] 傳入使用者選擇的日期
+    daily_stats = calculate_daily_summary(view_date)
 
 col1, col2, col3, col4, col5 = st.columns(5)
-col1.metric("💧 飲水", f"{int(daily_stats['water'])}", delta="目標 2000")
+# [修改] 目標改為 2400
+col1.metric("💧 飲水", f"{int(daily_stats['water'])}", delta="目標 2400")
 col2.metric("🔥 熱量", f"{int(daily_stats['cal'])}")
 col3.metric("🥩 蛋白質", f"{int(daily_stats['prot'])}")
 col4.metric("🍚 碳水", f"{int(daily_stats['carb'])}")
@@ -155,7 +169,7 @@ with tab1:
         st.subheader("新增體重")
         # 預設日期為台北時間的今天
         default_date_tw = datetime.now(TAIPEI_TZ).date()
-        w_date = st.date_input("日期", default_date_tw)
+        w_date = st.date_input("日期", default_date_tw, key="w_input_date")
         w_height = st.number_input("身高 (cm)", 100.0, 250.0, 170.0)
         w_weight = st.number_input("體重 (kg)", 0.0, 200.0, step=0.1, format="%.1f")
         if w_height > 0:
@@ -220,7 +234,7 @@ with tab2:
 
         # 顯示可編輯欄位
         c_date, c_time = st.columns(2)
-        sel_date = c_date.date_input("進食日期", default_date)
+        sel_date = c_date.date_input("進食日期", default_date, key="f_input_date")
         sel_time = c_time.time_input("進食時間", default_time)
 
         # 顯示營養素
@@ -265,12 +279,11 @@ with tab3:
         st.rerun()
 
     st.divider()
+    
+    # 這裡顯示的表格，依然跟隨上方的「檢視日期」
+    # 讓使用者可以查看當天的詳細喝水狀況
     df_w = load_data(WATER_SHEET_NAME)
     if not df_w.empty:
-        # 只顯示台北時間今天的紀錄
-        today_str = str(datetime.now(TAIPEI_TZ).date())
-        st.caption(f"今日 ({today_str}) 紀錄：")
-        st.dataframe(df_w[df_w['日期'].astype(str) == today_str], use_container_width=True)
-
-
-
+        view_date_str = str(view_date)
+        st.caption(f"📅 {view_date_str} 的飲水明細：")
+        st.dataframe(df_w[df_w['日期'].astype(str) == view_date_str], use_container_width=True)
