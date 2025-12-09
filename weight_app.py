@@ -300,4 +300,112 @@ with tab1:
             # 目標線
             goal_line = alt.Chart(pd.DataFrame({'目標體重': [target_weight]})).mark_rule(color='red', strokeDash=[5, 5]).encode(y='目標體重')
 
-            st.altair_chart(
+            st.altair_chart(line + goal_line, use_container_width=True)
+            # ✨ [優化] 只顯示最近 50 筆，避免太長
+            st.dataframe(df_weight.sort_values(by='日期', ascending=False).head(50), use_container_width=True)
+        else:
+            st.info("尚無體重資料")
+
+# --- Tab 2: 飲食 ---
+with tab2:
+    st.subheader("AI 視覺化飲食紀錄")
+    st.info("💡 提示：輸入「昨天中午吃的」，AI 會自動推算時間！")
+    col_f1, col_f2 = st.columns([1, 2])
+    with col_f1:
+        uploaded_file = st.file_uploader("📸 上傳食物照片", type=["jpg", "png", "jpeg"])
+        image = None
+        if uploaded_file:
+            image = Image.open(uploaded_file)
+            st.image(image, caption='預覽', use_container_width=True)
+        
+        food_input = st.text_input("文字補充", placeholder="例如：這是昨天晚上 7 點吃的牛肉麵")
+        
+        if st.button("🍱 AI 分析"):
+            if uploaded_file or food_input:
+                res = analyze_food_with_ai(image, food_input)
+                if res: st.session_state['last_result'] = res
+
+    with col_f2:
+        if 'last_result' in st.session_state:
+            res = st.session_state['last_result']
+            st.markdown("#### 🍽️ 分析結果確認")
+            
+            default_date = datetime.now(TAIPEI_TZ).date()
+            default_time = datetime.now(TAIPEI_TZ).time()
+            
+            if res.get('date'):
+                try: default_date = datetime.strptime(res['date'], "%Y-%m-%d").date()
+                except: pass
+            if res.get('time'):
+                try: default_time = datetime.strptime(res['time'], "%H:%M").time()
+                except: pass
+
+            c_date, c_time = st.columns(2)
+            sel_date = c_date.date_input("進食日期", default_date, key="f_input_date")
+            sel_time = c_time.time_input("進食時間", default_time)
+
+            st.markdown(f"**辨識：** {res['food_name']}")
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("熱量", res['calories'])
+            c2.metric("蛋白質", res['protein'])
+            c3.metric("碳水", res['carbs'])
+            c4.metric("脂肪", res.get('fat', 0))
+            
+            if st.button(f"📥 確認儲存"):
+                save_food_data(sel_date, sel_time.strftime("%H:%M"), res['food_name'], 
+                               res['calories'], res['protein'], res['carbs'], res.get('fat', 0))
+                st.success(f"✅ 已儲存！")
+                del st.session_state['last_result']
+                st.rerun()
+
+    st.divider()
+    df_food = load_data(FOOD_SHEET_NAME)
+    if not df_food.empty:
+        # ✨ [優化] 只顯示最近 50 筆
+        st.dataframe(df_food.sort_values(by=['日期', '時間'], ascending=False).head(50), use_container_width=True)
+
+# --- Tab 3: 飲水 ---
+with tab3:
+    st.subheader("💧 飲水紀錄")
+    b1, b2, b3, b4 = st.columns(4)
+    add_val = 0
+    
+    st.markdown(f"**今日目標:** {target_water} ml")
+    
+    if b1.button("+ 100ml"): add_val = 100
+    if b2.button("+ 300ml"): add_val = 300
+    if b3.button("+ 500ml"): add_val = 500
+    if b4.button("+ 700ml"): add_val = 700
+    
+    st.caption("--- 或 ---")
+    water_input = st.number_input("手動輸入 (ml)", 0, 2000, 0, step=50, key="manual_water_input")
+    if st.button("紀錄手動輸入"): add_val = water_input
+    
+    if add_val > 0:
+        save_water_data(add_val)
+        st.success(f"已紀錄 {add_val} ml")
+        st.rerun()
+
+    st.divider()
+    df_w = load_data(WATER_SHEET_NAME)
+    if not df_w.empty:
+        # ✨ [優化] 只顯示最近 50 筆
+        st.dataframe(df_w.sort_values(by=['日期', '時間'], ascending=False).head(50), use_container_width=True)
+
+# --- Tab 4: 設定 ---
+with tab4:
+    st.subheader("⚙️ 應用程式設定")
+    st.markdown("設定你的健康追蹤目標")
+    
+    # ✨ [優化] 確保輸入框拿到的是數字型別，避免報錯
+    curr_w_target = float(target_weight)
+    curr_water_target = int(target_water)
+
+    new_target_weight = st.number_input("目標體重 (kg)", 30.0, 150.0, curr_w_target, key="set_target_w")
+    new_target_water = st.number_input("每日飲水目標 (ml)", 1000, 5000, curr_water_target, step=100, key="set_target_h")
+    
+    if st.button("儲存目標設定"):
+        save_config('target_weight', new_target_weight)
+        save_config('target_water', new_target_water)
+        st.success("✅ 設定已儲存！")
+        # 不需要手動重新整理，save_config 內已清除快取，下次 rerun 會讀到新的
