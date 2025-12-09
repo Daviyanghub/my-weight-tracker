@@ -2,8 +2,9 @@ import streamlit as st
 import pandas as pd
 import gspread
 import google.generativeai as genai
-from datetime import datetime, date
+from datetime import datetime, date, timezone # <--- 修正這行
 from PIL import Image
+import pytz # <--- 新增這行
 
 # --- 設定區 ---
 SHEET_ID = 'My Weight Data'  # 你的試算表名稱
@@ -169,6 +170,7 @@ with tab2:
             
             st.success(f"已儲存！ (含脂肪 {res.get('fat', 0)}g)")
             del st
+
 
 
 
