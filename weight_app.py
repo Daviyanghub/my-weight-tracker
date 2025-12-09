@@ -31,19 +31,16 @@ else:
     st.error("⚠️ 尚未設定 Gemini API Key！請去 Secrets 貼上。")
 
 def analyze_food_with_ai(image_data, text_input):
-    """叫 AI 幫我們看照片 + 讀文字"""
+    """叫 AI 幫我們看照片 + 讀文字 (除錯版)"""
     model = genai.GenerativeModel('gemini-1.5-flash') 
     
-    # 組合給 AI 的指令
     prompt = """
     你是一個專業營養師。請分析這份飲食。
-    請依據圖片內容（如果有）以及文字描述（如果有）進行綜合評估。
-    
     請估算它的：1.熱量(大卡), 2.蛋白質(克), 3.碳水化合物(克)。
     
     請直接回傳一個 JSON 格式，不要有markdown標記，格式如下：
     {
-        "food_name": "食物簡稱(例如: 雞腿便當)",
+        "food_name": "食物簡稱",
         "calories": 數字,
         "protein": 數字,
         "carbs": 數字
@@ -53,16 +50,25 @@ def analyze_food_with_ai(image_data, text_input):
     if text_input:
         prompt += f"\n使用者補充說明：{text_input}"
 
-    # 準備傳送給 AI 的資料包
     inputs = [prompt]
     if image_data:
         inputs.append(image_data)
         
     try:
+        # 這裡加了除錯訊息，讓我們知道進度到哪了
+        st.toast("📡 正在傳送資料給 Google AI...", icon="🤖")
         response = model.generate_content(inputs)
+        
+        st.toast("✅ 收到 AI 回應！正在解析...", icon="✨")
+        # 印出原始回應，萬一格式錯了我們看得到
+        print(f"DEBUG AI Response: {response.text}") 
+        
         clean_json = response.text.replace('```json', '').replace('```', '').strip()
         return eval(clean_json)
     except Exception as e:
+        # ⚠️ 這裡是最重要的！如果有錯，直接印在螢幕上給你看
+        st.error(f"❌ 發生錯誤：{e}")
+        st.write("錯誤原因可能為：API Key 過期、圖片格式不支援、或是 AI 回傳了奇怪的格式。")
         return None
 
 # --- 3. 讀寫資料函式 ---
@@ -168,4 +174,5 @@ with tab2:
             st.subheader("📝 近期飲食紀錄")
             st.dataframe(df_food.sort_values('日期', ascending=False))
     except:
+
         st.write("目前還沒有飲食資料")
