@@ -32,17 +32,17 @@ else:
 
 def analyze_food_with_ai(image_data, text_input):
     """
-    雙模型切換版：
-    - 有圖：使用 gemini-pro-vision
-    - 沒圖：使用 gemini-pro
-    這樣就不需要依賴最新版套件，解決 404 問題。
+    最終修復版：
+    1. 改回使用 gemini-1.5-flash (這是 2025 年的主流模型)。
+    2. 增加錯誤診斷：如果報錯，會告訴你到底發生什麼事。
     """
+    # 使用正確的 1.5 Flash 模型
+    model_name = 'gemini-1.5-flash'
+    model = genai.GenerativeModel(model_name)
     
-    # 準備 Prompt (你的指令)
-    base_prompt = """
+    prompt = """
     你是一個專業營養師。請分析這份飲食。
     請估算它的：1.熱量(大卡), 2.蛋白質(克), 3.碳水化合物(克)。
-    
     請直接回傳一個 JSON 格式，不要有markdown標記，格式如下：
     {
         "food_name": "食物簡稱",
@@ -51,36 +51,41 @@ def analyze_food_with_ai(image_data, text_input):
         "carbs": 數字
     }
     """
-    
     if text_input:
-        base_prompt += f"\n使用者補充說明：{text_input}"
+        prompt += f"\n使用者補充說明：{text_input}"
 
-    try:
-        st.toast("📡 呼叫 AI 營養師中...", icon="🤖")
+    inputs = [prompt]
+    if image_data:
+        inputs.append(image_data)
         
-        # --- 關鍵修改：自動切換模型 ---
-        if image_data:
-            # 情況 A：有照片 -> 用視覺模型 (gemini-pro-vision)
-            # 注意：舊版模型要求圖片放列表前面
-            model = genai.GenerativeModel('gemini-pro-vision')
-            inputs = [base_prompt, image_data]
-            response = model.generate_content(inputs)
-        else:
-            # 情況 B：純文字 -> 用文字模型 (gemini-pro)
-            model = genai.GenerativeModel('gemini-pro')
-            response = model.generate_content(base_prompt)
-            
-        st.toast("✅ 收到 AI 回應！正在解析...", icon="✨")
-        print(f"DEBUG AI Response: {response.text}") 
+    try:
+        st.toast(f"📡 呼叫 {model_name} 中...", icon="🤖")
+        response = model.generate_content(inputs)
+        st.toast("✅ AI 成功回應！", icon="✨")
         
         clean_json = response.text.replace('```json', '').replace('```', '').strip()
         return eval(clean_json)
 
     except Exception as e:
         st.error(f"❌ 發生錯誤：{e}")
-        st.info("如果顯示 '404'，代表 AI 暫時連不上，請稍後再試。")
+        
+        # --- 這是救命的診斷功能 ---
+        with st.expander("🕵️‍♂️ 點這裡進行故障排除 (列出可用模型)"):
+            st.write("正在查詢您的 API Key 能存取哪些模型...")
+            try:
+                available_models = [m.name for m in genai.list_models()]
+                st.write("✅ 您的帳號可用模型清單：")
+                st.json(available_models)
+                
+                if f"models/{model_name}" not in available_models:
+                    st.warning(f"⚠️ 警告：清單裡沒有 {model_name}，可能是 API 權限沒開？")
+                    st.markdown("👉 請去 Google Cloud Console 搜尋 **'Generative Language API'** 並啟用它。")
+            except Exception as list_e:
+                st.error(f"無法列出模型，代表 API Key 權限完全被擋住了。錯誤：{list_e}")
+                st.markdown("👉 請檢查 **Google Cloud Console** 是否有啟用 **Generative Language API**。")
+        
         return None
-
+        
 # --- 3. 讀寫資料函式 ---
 def save_weight_data(d, h, w, b):
     ws = get_google_sheet(WEIGHT_SHEET_NAME)
@@ -186,6 +191,7 @@ with tab2:
     except:
 
         st.write("目前還沒有飲食資料")
+
 
 
 
