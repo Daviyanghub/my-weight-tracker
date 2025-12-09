@@ -32,7 +32,7 @@ else:
 
 def analyze_food_with_ai(image_data, text_input):
     """叫 AI 幫我們看照片 + 讀文字 (除錯版)"""
-    model = genai.GenerativeModel('gemini-1.5-flash-latest') 
+    model = genai.GenerativeModel('gemini-1.5-flash') 
     
     prompt = """
     你是一個專業營養師。請分析這份飲食。
@@ -176,4 +176,5 @@ with tab2:
     except:
 
         st.write("目前還沒有飲食資料")
+
 
