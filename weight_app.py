@@ -100,15 +100,20 @@ def analyze_food_with_ai(image_data, text_input):
     current_time_str = now_dt.strftime("%Y-%m-%d %H:%M")
     
     prompt = f"""
-    你是一個專業營養師，正在協助使用者進行「168斷食減重衝刺」。
-    現在的時間是：{current_time_str} (GMT+8 台北時間)。
-    請分析這份飲食，並根據使用者的文字描述推斷「進食時間」。
-    
-    任務：
-    1. 估算營養：熱量(kcal), 蛋白質(g), 碳水(g), 脂肪(g)。
-    2. 推斷時間：如果使用者說 "剛剛吃的"，請推算 date (YYYY-MM-DD) 和 time (HH:MM)。
-    
-    請直接回傳標準 JSON 格式：
+        你是一個專業營養師。現在的時間是：{current_time_str} (GMT+8 台北時間)。
+        請分析這份飲食，並根據使用者的文字描述推斷「進食時間」。
+
+        【專屬知識庫 - 請優先採用以下數值】
+        - 如果使用者提到「蛋白粉」、「香醇可可」、「奶茶風味」或「Tryall」，請依據此標準計算：
+          每 25g (1份) 含有：熱量 110kcal, 蛋白質 18g, 脂肪 2.6g, 碳水 3.8g。
+          (請依照使用者實際攝取的克數或份數進行等比例換算)
+
+        任務：
+        1. 估算營養：熱量(kcal), 蛋白質(g), 碳水(g), 脂肪(g)。
+        2. 推斷時間：如果使用者說 "早上8點吃的"，請推算 date (YYYY-MM-DD) 和 time (HH:MM)。
+        
+        請直接回傳標準 JSON 格式... (後面保持不變)
+        """
     {{
         "food_name": "食物簡稱",
         "calories": 數字,
@@ -480,3 +485,4 @@ with tab4:
         save_config('target_cal', new_target_cal)
         save_config('target_protein', new_target_protein)
         st.success("✅ 設定已更新！")
+
