@@ -99,21 +99,26 @@ def analyze_food_with_ai(image_data, text_input):
     now_dt = datetime.now(TAIPEI_TZ)
     current_time_str = now_dt.strftime("%Y-%m-%d %H:%M")
     
+    # ✨✨✨ 這裡加入了你的蛋白粉專屬資料庫 ✨✨✨
     prompt = f"""
-        你是一個專業營養師。現在的時間是：{current_time_str} (GMT+8 台北時間)。
-        請分析這份飲食，並根據使用者的文字描述推斷「進食時間」。
+    你是一個專業營養師，正在協助使用者進行「168斷食減重衝刺」。
+    現在的時間是：{current_time_str} (GMT+8 台北時間)。
 
-        【專屬知識庫 - 請優先採用以下數值】
-        - 如果使用者提到「蛋白粉」、「香醇可可」、「奶茶風味」或「Tryall」，請依據此標準計算：
-          每 25g (1份) 含有：熱量 110kcal, 蛋白質 18g, 脂肪 2.6g, 碳水 3.8g。
-          (請依照使用者實際攝取的克數或份數進行等比例換算)
+    【🌟 專屬食物資料庫 - 請絕對優先採用】
+    若使用者提到以下關鍵字：「蛋白粉」、「Tryall」、「香醇可可」、「奶茶風味」，請直接使用以下標準數值計算，不要另外估算：
+    👉 每份 (25g) 含有：
+       - 熱量：110 kcal
+       - 蛋白質：18 g
+       - 脂肪：2.6 g
+       - 碳水：3.8 g
+    ⚠️ 請根據使用者描述的份量自動換算 (例如：喝了2份 -> 數值x2；喝了50g -> 數值x2)。
 
-        任務：
-        1. 估算營養：熱量(kcal), 蛋白質(g), 碳水(g), 脂肪(g)。
-        2. 推斷時間：如果使用者說 "早上8點吃的"，請推算 date (YYYY-MM-DD) 和 time (HH:MM)。
-        
-        請直接回傳標準 JSON 格式... (後面保持不變)
-        """
+    【一般任務】
+    請分析這份飲食，並根據使用者的文字描述推斷「進食時間」。
+    1. 估算營養：熱量(kcal), 蛋白質(g), 碳水(g), 脂肪(g)。
+    2. 推斷時間：如果使用者說 "剛剛吃的"，請推算 date (YYYY-MM-DD) 和 time (HH:MM)。
+    
+    請直接回傳標準 JSON 格式：
     {{
         "food_name": "食物簡稱",
         "calories": 數字,
@@ -249,11 +254,10 @@ def calculate_daily_macros_goal(daily_stats, config):
     elif daily_stats['cal'] < target_cal * 0.5:
         alerts.append(("⚡ 熱量過低", "吃太少會掉肌肉！請在進食窗口內盡快補充足夠熱量。", "orange"))
         
-    # 2. 蛋白質檢核 (修正建議)
+    # 2. 蛋白質檢核
     if daily_stats['prot'] < target_protein:
         missing_prot = target_protein - daily_stats['prot']
-        # ⚠️ 修正：提醒在進食窗口結束前吃完
-        alerts.append(("🥩 蛋白質不足", f"還差 {missing_prot:.0f}g！請務必在「進食窗口結束前」補足，避免肌肉流失。", "orange"))
+        alerts.append(("🥩 蛋白質不足", f"還差 {missing_prot:.0f}g！請務必在「進食窗口結束前」補足。", "orange"))
         
     # 3. 碳水檢核
     if daily_stats['carb'] > 120:
@@ -485,4 +489,3 @@ with tab4:
         save_config('target_cal', new_target_cal)
         save_config('target_protein', new_target_protein)
         st.success("✅ 設定已更新！")
-
