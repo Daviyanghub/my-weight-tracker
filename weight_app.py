@@ -391,7 +391,7 @@ with tab2:
         uploaded_file = st.file_uploader("📸 上傳食物照片", type=["jpg", "png", "jpeg"])
         image = None
         if uploaded_file:
-            image = Image.open(uploaded_file)
+            image = Image.open(uploaded_file).convert('RGB') # <--- 修改這一行 (第 248 行)
             st.image(image, caption='預覽', use_container_width=True)
         
         food_input = st.text_input("文字補充", placeholder="例如：去皮雞腿便當，飯只吃一半")
@@ -489,3 +489,4 @@ with tab4:
         save_config('target_cal', new_target_cal)
         save_config('target_protein', new_target_protein)
         st.success("✅ 設定已更新！")
+
