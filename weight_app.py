@@ -7,6 +7,7 @@ from PIL import Image
 import pytz
 import json 
 import altair as alt 
+import re
 
 # --- 設定區 ---
 SHEET_ID = 'My Weight Data'
@@ -88,12 +89,9 @@ def get_config():
 
 # --- 核心邏輯函式 ---
 
-import base64
-from io import BytesIO
-import google.generativeai as genai
 
 def analyze_food_with_ai(image_data, text_input):
-    """使用你現有的 google.generativeai 套件進行圖像 + 文字分析"""
+    """使用你現有的 google.generativeai 套件進行圖像 + 文字分析 (增強版)"""
 
     if "gemini_api_key" not in st.secrets:
         st.error("❌ Gemini API Key 尚未設定！")
@@ -101,7 +99,7 @@ def analyze_food_with_ai(image_data, text_input):
 
     genai.configure(api_key=st.secrets["gemini_api_key"])
 
-    model = genai.GenerativeModel("gemini-2.5-flash")  # 或用 3.0，你自己有的即可
+    model = genai.GenerativeModel("gemini-2.5-flash") 
 
     now_dt = datetime.now(TAIPEI_TZ)
     current_time_str = now_dt.strftime("%Y-%m-%d %H:%M")
@@ -113,23 +111,20 @@ def analyze_food_with_ai(image_data, text_input):
 【專屬食物資料庫（優先使用）】
 若食物描述中包含 “蛋白粉”、“Tryall”、“香醇可可”、“奶茶風味”，
 請直接使用以下固定數值（每 25g）：
-
 - 熱量：110 kcal
 - 蛋白質：18 g
 - 脂肪：2.6 g
 - 碳水：3.8 g
-
-依使用者描述自動換算份量。
+依使用者描述自動換算份量（例如 1.6 杯就是上述數值乘以 1.6）。
 
 【任務】
-請分析飲食並輸出乾淨的 JSON，不要描述，不要多餘文字：
-
+請分析飲食並輸出乾淨的 JSON：
 {{
   "food_name": "...",
-  "calories": 數字,
-  "protein": 數字,
-  "carbs": 數字,
-  "fat": 數字,
+  "calories": 數字(整數),
+  "protein": 數字(小數點後一位),
+  "carbs": 數字(小數點後一位),
+  "fat": 數字(小數點後一位),
   "date": "YYYY-MM-DD",
   "time": "HH:MM"
 }}
@@ -138,22 +133,15 @@ def analyze_food_with_ai(image_data, text_input):
     if text_input:
         prompt += f"\n使用者補充：{text_input}"
 
-    # --- 處理圖片：轉 base64，供 Gemini 使用 ---
+    # --- 處理圖片 ---
     contents = [prompt]
-
     if image_data:
         try:
             buf = BytesIO()
             image_data.save(buf, format="JPEG")
             img_bytes = buf.getvalue()
             b64 = base64.b64encode(img_bytes).decode("utf-8")
-
-            contents.append(
-                {
-                    "mime_type": "image/jpeg",
-                    "data": b64
-                }
-            )
+            contents.append({"mime_type": "image/jpeg", "data": b64})
         except Exception as e:
             st.warning(f"⚠️ 圖片讀取失敗，只用文字分析：{e}")
 
@@ -162,28 +150,35 @@ def analyze_food_with_ai(image_data, text_input):
 
         response = model.generate_content(
             contents,
-            safety_settings={"HARASSMENT": "BLOCK_NONE"},
-            generation_config={"max_output_tokens": 500}
+            generation_config={
+                "max_output_tokens": 500,
+                "temperature": 0.7,
+                # 🔥 關鍵修正：強制指定回傳 JSON 格式
+                "response_mime_type": "application/json" 
+            }
         )
 
         raw = response.text
-
-        # 清除 code block
-        clean = raw.replace("```json", "").replace("```", "").strip()
-
-        st.toast("✅ 分析完成！", icon="✨")
-
-        return json.loads(clean)
+        
+        # 🔥 雙重保險：使用 Regex 抓取第一個 { 到 最後一個 } 之間的內容
+        # 即使 AI 回傳了 Markdown 標記，這段也能精準抓出 JSON
+        match = re.search(r'\{.*\}', raw, re.DOTALL)
+        
+        if match:
+            clean_json = match.group(0)
+            return json.loads(clean_json)
+        else:
+            # 如果 regex 抓不到，嘗試直接 parse (因為有設定 response_mime_type 通常不會錯)
+            return json.loads(raw)
 
     except json.JSONDecodeError:
-        st.error("❌ JSON 解析失敗，以下是 AI 回傳：")
-        st.write(raw)
+        st.error("❌ JSON 解析失敗，請重試。原始回傳如下：")
+        st.code(raw) # 使用 st.code 比較好閱讀 debug
         return None
 
     except Exception as e:
-        st.error(f"❌ AI 解析錯誤：{e}")
+        st.error(f"❌ AI 連線或解析錯誤：{e}")
         return None
-
 
 
 # --- 資料讀寫與計算 ---
@@ -525,6 +520,7 @@ with tab4:
         save_config('target_cal', new_target_cal)
         save_config('target_protein', new_target_protein)
         st.success("✅ 設定已更新！")
+
 
 
 
