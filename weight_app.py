@@ -101,7 +101,7 @@ def analyze_food_with_ai(image_data, text_input):
 
     genai.configure(api_key=st.secrets["gemini_api_key"])
 
-    model = genai.GenerativeModel("gemini-1.5-flash")  # 或用 3.0，你自己有的即可
+    model = genai.GenerativeModel("gemini-2.5-flash")  # 或用 3.0，你自己有的即可
 
     now_dt = datetime.now(TAIPEI_TZ)
     current_time_str = now_dt.strftime("%Y-%m-%d %H:%M")
@@ -525,6 +525,7 @@ with tab4:
         save_config('target_cal', new_target_cal)
         save_config('target_protein', new_target_protein)
         st.success("✅ 設定已更新！")
+
 
 
 
