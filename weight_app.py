@@ -94,7 +94,7 @@ def analyze_food_with_ai(image_data, text_input):
         st.error("❌ Gemini API Key 尚未設定！")
         return None
         
-    model_name = 'gemini-2.5-flash'
+    model_name = 'gemini-3.0-flash'
     model = genai.GenerativeModel(model_name)
     now_dt = datetime.now(TAIPEI_TZ)
     current_time_str = now_dt.strftime("%Y-%m-%d %H:%M")
@@ -489,4 +489,5 @@ with tab4:
         save_config('target_cal', new_target_cal)
         save_config('target_protein', new_target_protein)
         st.success("✅ 設定已更新！")
+
 
