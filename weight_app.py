@@ -105,7 +105,7 @@ def analyze_food_with_ai(image_data, text_input):
     # 2. "gemini-2.0-flash-exp" (如果你是想用最新的)
     # 3. 或是改回你原本的 "gemini-2.5-flash" (如果你確定這名稱對你的帳號有效)
     # ---------------------------------------------------------
-    target_model_name = "gemini-2.0-flash-exp"  # 這裡先預設嘗試 2.0，若不行請改回你原本的名稱
+    target_model_name = "gemini-2.5-flash"  # 這裡先預設嘗試 2.0，若不行請改回你原本的名稱
 
     try:
         model = genai.GenerativeModel(target_model_name)
@@ -538,6 +538,7 @@ with tab4:
         save_config('target_cal', new_target_cal)
         save_config('target_protein', new_target_protein)
         st.success("✅ 設定已更新！")
+
 
 
 
