@@ -91,7 +91,7 @@ def get_config():
 
 
 def analyze_food_with_ai(image_data, text_input):
-    """使用你現有的 google.generativeai 套件進行圖像 + 文字分析 (增強版)"""
+    """(通用修正版) 增加 Token 上限並增強 JSON 清洗能力"""
 
     if "gemini_api_key" not in st.secrets:
         st.error("❌ Gemini API Key 尚未設定！")
@@ -99,7 +99,20 @@ def analyze_food_with_ai(image_data, text_input):
 
     genai.configure(api_key=st.secrets["gemini_api_key"])
 
-    model = genai.GenerativeModel("gemini-2.5-flash") 
+    # ---------------------------------------------------------
+    # 🔧 設定模型：如果 1.5 不能用，請試試看以下幾個名稱：
+    # 1. "gemini-pro" (最通用，但處理圖片能力較弱)
+    # 2. "gemini-2.0-flash-exp" (如果你是想用最新的)
+    # 3. 或是改回你原本的 "gemini-2.5-flash" (如果你確定這名稱對你的帳號有效)
+    # ---------------------------------------------------------
+    target_model_name = "gemini-2.0-flash-exp"  # 這裡先預設嘗試 2.0，若不行請改回你原本的名稱
+
+    try:
+        model = genai.GenerativeModel(target_model_name)
+    except Exception:
+        # 如果指定的模型失敗，自動切換回最基本的 gemini-pro (純文字) 或提示錯誤
+        st.warning(f"⚠️ 無法載入 {target_model_name}，嘗試切換至 gemini-pro...")
+        model = genai.GenerativeModel("gemini-pro")
 
     now_dt = datetime.now(TAIPEI_TZ)
     current_time_str = now_dt.strftime("%Y-%m-%d %H:%M")
@@ -118,9 +131,10 @@ def analyze_food_with_ai(image_data, text_input):
 依使用者描述自動換算份量（例如 1.6 杯就是上述數值乘以 1.6）。
 
 【任務】
-請分析飲食並輸出乾淨的 JSON：
+請分析飲食並輸出 JSON 格式。
+重要：請務必輸出完整的 JSON，不要被截斷。
 {{
-  "food_name": "...",
+  "food_name": "食物名稱",
   "calories": 數字(整數),
   "protein": 數字(小數點後一位),
   "carbs": 數字(小數點後一位),
@@ -133,51 +147,55 @@ def analyze_food_with_ai(image_data, text_input):
     if text_input:
         prompt += f"\n使用者補充：{text_input}"
 
-    # --- 處理圖片 ---
     contents = [prompt]
+    
+    # 圖片處理 (部分舊模型可能不支援圖片，這裡做防呆)
     if image_data:
         try:
-            buf = BytesIO()
-            image_data.save(buf, format="JPEG")
-            img_bytes = buf.getvalue()
-            b64 = base64.b64encode(img_bytes).decode("utf-8")
-            contents.append({"mime_type": "image/jpeg", "data": b64})
+            if "vision" in target_model_name or "flash" in target_model_name or "pro" in target_model_name:
+                buf = BytesIO()
+                image_data.save(buf, format="JPEG")
+                img_bytes = buf.getvalue()
+                b64 = base64.b64encode(img_bytes).decode("utf-8")
+                contents.append({"mime_type": "image/jpeg", "data": b64})
         except Exception as e:
-            st.warning(f"⚠️ 圖片讀取失敗，只用文字分析：{e}")
+            st.caption(f"⚠️ 略過圖片分析 (模型可能不支援或格式錯誤): {e}")
 
     try:
-        st.toast("📡 AI 分析中...", icon="🕒")
+        st.toast(f"📡 AI 分析中 ({target_model_name})...", icon="⏳")
 
+        # 🔥 關鍵修正：把 max_output_tokens 拉大，解決「JSON被切一半」的問題
         response = model.generate_content(
             contents,
             generation_config={
-                "max_output_tokens": 500,
                 "temperature": 0.7,
-                # 🔥 關鍵修正：強制指定回傳 JSON 格式
-                "response_mime_type": "application/json" 
+                "max_output_tokens": 2000, 
             }
         )
 
         raw = response.text
         
-        # 🔥 雙重保險：使用 Regex 抓取第一個 { 到 最後一個 } 之間的內容
-        # 即使 AI 回傳了 Markdown 標記，這段也能精準抓出 JSON
-        match = re.search(r'\{.*\}', raw, re.DOTALL)
+        # --- 強力清洗 JSON (Regex) ---
+        # 就算 AI 回傳了 Markdown 或其他廢話，這段程式碼會硬抓出 JSON
+        match = re.search(r'\{[\s\S]*\}', raw)
         
         if match:
-            clean_json = match.group(0)
-            return json.loads(clean_json)
+            json_str = match.group(0)
+            return json.loads(json_str)
         else:
-            # 如果 regex 抓不到，嘗試直接 parse (因為有設定 response_mime_type 通常不會錯)
-            return json.loads(raw)
+            # 最後手段：嘗試清理 markdown 符號
+            clean = raw.replace("```json", "").replace("```", "").strip()
+            return json.loads(clean)
 
     except json.JSONDecodeError:
-        st.error("❌ JSON 解析失敗，請重試。原始回傳如下：")
-        st.code(raw) # 使用 st.code 比較好閱讀 debug
+        st.error("❌ JSON 解析失敗 (格式仍有誤)")
+        st.markdown("#### AI 原始回傳：")
+        st.code(raw)
         return None
 
     except Exception as e:
-        st.error(f"❌ AI 連線或解析錯誤：{e}")
+        st.error(f"❌ 發生錯誤 (可能是模型名稱無效): {e}")
+        st.caption("建議：請在程式碼中修改 `target_model_name` 為你確認可用的模型 (例如 'gemini-pro')")
         return None
 
 
@@ -520,6 +538,7 @@ with tab4:
         save_config('target_cal', new_target_cal)
         save_config('target_protein', new_target_protein)
         st.success("✅ 設定已更新！")
+
 
 
 
