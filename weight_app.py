@@ -90,114 +90,100 @@ def get_config():
 
 import base64
 from io import BytesIO
-from google import genai  # 確認是 google-genai 套件
+import google.generativeai as genai
 
 def analyze_food_with_ai(image_data, text_input):
-    """新的 Gemini 呼叫版本：支援 inline image (base64)、強化錯誤處理，並嘗試解析 JSON"""
-    # 驗證 key
-    api_key_name = "gemini_api_key"
-    if api_key_name not in st.secrets:
-        st.error("❌ Gemini API Key 尚未設定！請確認 st.secrets 裡 key 名稱為 'gemini_api_key'")
+    """使用你現有的 google.generativeai 套件進行圖像 + 文字分析"""
+
+    if "gemini_api_key" not in st.secrets:
+        st.error("❌ Gemini API Key 尚未設定！")
         return None
 
-    # 建立 client（依官方範例）
-    genai.configure(api_key=st.secrets[api_key_name])
-    client = genai.Client()
+    genai.configure(api_key=st.secrets["gemini_api_key"])
 
-    model_id = "gemini-3.0-flash"  # 或你想用的模型
+    model = genai.GenerativeModel("gemini-1.5-flash")  # 或用 3.0，你自己有的即可
+
     now_dt = datetime.now(TAIPEI_TZ)
     current_time_str = now_dt.strftime("%Y-%m-%d %H:%M")
 
     prompt = f"""
-    你是一個專業營養師，正在協助使用者進行「168斷食減重衝刺」。
-    現在的時間是：{current_time_str} (GMT+8 台北時間)。
+你是一個專業營養師，正在協助使用者進行「168斷食減重衝刺」。
+現在的時間是：{current_time_str}。
 
-    【🌟 專屬食物資料庫 - 請絕對優先採用】
-    若使用者提到以下關鍵字：「蛋白粉」、「Tryall」、「香醇可可」、「奶茶風味」，請直接使用以下標準數值計算，不要另外估算：
-    👉 每份 (25g) 含有：
-       - 熱量：110 kcal
-       - 蛋白質：18 g
-       - 脂肪：2.6 g
-       - 碳水：3.8 g
-    ⚠️ 請根據使用者描述的份量自動換算 (例如：喝了2份 -> 數值x2；喝了50g -> 數值x2)。
+【專屬食物資料庫（優先使用）】
+若食物描述中包含 “蛋白粉”、“Tryall”、“香醇可可”、“奶茶風味”，
+請直接使用以下固定數值（每 25g）：
 
-    【一般任務】
-    請分析這份飲食，並根據使用者的文字描述推斷「進食時間」。
-    1. 估算營養：熱量(kcal), 蛋白質(g), 碳水(g), 脂肪(g)。
-    2. 推斷時間：如果使用者說 "剛剛吃的"，請推算 date (YYYY-MM-DD) 和 time (HH:MM)。
+- 熱量：110 kcal
+- 蛋白質：18 g
+- 脂肪：2.6 g
+- 碳水：3.8 g
 
-    請直接回傳標準 JSON 格式：
-    {{
-        "food_name": "食物簡稱",
-        "calories": 數字,
-        "protein": 數字,
-        "carbs": 數字,
-        "fat": 數字,
-        "date": "YYYY-MM-DD" 或 null,
-        "time": "HH:MM" 或 null
-    }}
-    """
+依使用者描述自動換算份量。
+
+【任務】
+請分析飲食並輸出乾淨的 JSON，不要描述，不要多餘文字：
+
+{{
+  "food_name": "...",
+  "calories": 數字,
+  "protein": 數字,
+  "carbs": 數字,
+  "fat": 數字,
+  "date": "YYYY-MM-DD",
+  "time": "HH:MM"
+}}
+"""
+
     if text_input:
-        prompt += f"\n使用者補充說明：{text_input}"
+        prompt += f"\n使用者補充：{text_input}"
 
-    # 如果有 image，轉 base64 並組成 inline image 內容
-    contents = []
-    contents.append(prompt)
+    # --- 處理圖片：轉 base64，供 Gemini 使用 ---
+    contents = [prompt]
 
-    if image_data is not None:
+    if image_data:
         try:
             buf = BytesIO()
-            image_data.save(buf, format="JPEG", quality=90)
+            image_data.save(buf, format="JPEG")
             img_bytes = buf.getvalue()
             b64 = base64.b64encode(img_bytes).decode("utf-8")
-            # 根據官方「inline image」範例，把 image 以 dict 的形式放入 contents
-            image_content = {
-                "type": "image",
-                "image": {
+
+            contents.append(
+                {
                     "mime_type": "image/jpeg",
                     "data": b64
                 }
-            }
-            contents.append(image_content)
+            )
         except Exception as e:
-            st.warning(f"⚠️ 圖片處理失敗：{e}. 將只用文字進行分析。")
+            st.warning(f"⚠️ 圖片讀取失敗，只用文字分析：{e}")
 
     try:
         st.toast("📡 AI 分析中...", icon="🕒")
-        # 官方建議的呼叫方式：client.models.generate_content(...)
-        response = client.models.generate_content(
-            model=model_id,
-            contents=contents,
-            # 可加參數微調，如：max_output_tokens、temperature
-            max_output_tokens=800
+
+        response = model.generate_content(
+            contents,
+            safety_settings={"HARASSMENT": "BLOCK_NONE"},
+            generation_config={"max_output_tokens": 500}
         )
-        text_resp = getattr(response, "text", None)
-        if not text_resp:
-            # 有時候 response 會在 .output 或 .content 裡，先嘗試把整個物件轉成 str 檢查
-            text_resp = str(response)
 
-        # 盡可能抽出 JSON（處理 code block 或前後雜訊）
-        clean_json = text_resp
-        # 去除 ```json ``` 或 ``` 等 code fences
-        for marker in ["```json", "```python", "```"]:
-            clean_json = clean_json.replace(marker, "")
-        clean_json = clean_json.strip()
+        raw = response.text
 
-        # 嘗試解析
-        parsed = json.loads(clean_json)
-        st.toast("✅ AI 分析完成！", icon="✨")
-        return parsed
+        # 清除 code block
+        clean = raw.replace("```json", "").replace("```", "").strip()
+
+        st.toast("✅ 分析完成！", icon="✨")
+
+        return json.loads(clean)
+
     except json.JSONDecodeError:
-        st.error("❌ 錯誤：AI 回傳格式不正確 (JSON 解析失敗)。請查看模型回傳的原始文字。")
-        st.write("=== 模型原始回傳開始 ===")
-        st.write(text_resp)
-        st.write("=== 模型原始回傳結束 ===")
+        st.error("❌ JSON 解析失敗，以下是 AI 回傳：")
+        st.write(raw)
         return None
+
     except Exception as e:
-        st.error(f"❌ 系統錯誤：{e}")
-        # 把錯誤細節輸出到 log（方便除錯）
-        print("Gemini error:", e)
+        st.error(f"❌ AI 解析錯誤：{e}")
         return None
+
 
 
 # --- 資料讀寫與計算 ---
@@ -539,6 +525,7 @@ with tab4:
         save_config('target_cal', new_target_cal)
         save_config('target_protein', new_target_protein)
         st.success("✅ 設定已更新！")
+
 
 
 
