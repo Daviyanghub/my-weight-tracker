@@ -390,21 +390,37 @@ col_p2.metric("今日剩餘熱量額度", f"{int(calories_left)} kcal")
 prog_val = min(analysis['cal_percent'] / 100, 1.0)
 col_p2.progress(prog_val)
 
-# 3. 營養比例 (熱量佔比)
+# 3. 營養比例 (熱量佔比) - 修改版
+# 使用 st.markdown 模擬 Metric 的標題樣式，讓三欄視覺對齊
+col_p3.markdown("""
+    <style>
+    .macro-title {
+        font-size: 14px;
+        font-weight: 400;
+        color: rgb(250, 250, 250);
+        margin-bottom: 5px;
+    }
+    </style>
+    <div class="macro-title">營養素熱量比例 (kcal)</div>
+    """, unsafe_allow_html=True)
+
 if not analysis['macros_data'].empty and analysis['macros_data']['Calories'].sum() > 0:
-    chart = alt.Chart(analysis['macros_data']).mark_arc(outerRadius=100).encode(
-        # 修改：theta 改抓 Calories (熱量)
+    chart = alt.Chart(analysis['macros_data']).mark_arc(outerRadius=85).encode(
+        # 關鍵：這裡指定使用 "Calories" (熱量) 作為角度
         theta=alt.Theta(field="Calories", type="quantitative"),
-        color=alt.Color(field="Nutrient", type="nominal", scale=alt.Scale(domain=['蛋白質', '碳水化合物', '脂肪'], range=['#FF4B4B', '#3186CC', '#FFAA00'])),
+        # 指定顏色：蛋白(紅), 碳水(藍), 脂肪(黃)
+        color=alt.Color(field="Nutrient", type="nominal", 
+                        scale=alt.Scale(domain=['蛋白質', '碳水化合物', '脂肪'], 
+                                      range=['#FF4B4B', '#3186CC', '#FFAA00']),
+                        legend=None), # 隱藏圖例以節省空間，改用 Tooltip
         order=alt.Order(field="Percentage", sort="descending"),
-        # 修改：Tooltip 增加顯示熱量
         tooltip=[
             "Nutrient", 
             alt.Tooltip("Grams", format=".1f", title="重量(g)"), 
             alt.Tooltip("Calories", format=".0f", title="熱量(kcal)"),
             alt.Tooltip("Percentage", format=".1f", title="熱量佔比(%)")
         ]
-    ).properties(title="營養素熱量比例")
+    )
     col_p3.altair_chart(chart, use_container_width=True)
 else:
     col_p3.info("尚無數據")
@@ -555,6 +571,7 @@ with tab4:
         save_config('target_cal', new_target_cal)
         save_config('target_protein', new_target_protein)
         st.success("✅ 設定已更新！")
+
 
 
 
