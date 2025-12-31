@@ -277,7 +277,7 @@ def calculate_daily_summary(target_date):
     return totals
 
 def calculate_daily_macros_goal(daily_stats, config):
-    """計算並回傳今日營養目標達成狀況及建議 (168 衝刺版)"""
+    """計算並回傳今日營養目標達成狀況及建議 (168 衝刺版 - 熱量佔比修正)"""
     
     target_cal = config.get('target_cal', 1500)
     target_protein = config.get('target_protein', 160)
@@ -286,12 +286,22 @@ def calculate_daily_macros_goal(daily_stats, config):
     cal_percent = (daily_stats['cal'] / target_cal) * 100 if target_cal > 0 else 0
     prot_percent = (daily_stats['prot'] / target_protein) * 100 if target_protein > 0 else 0
     
-    total_g = daily_stats['prot'] + daily_stats['carb'] + daily_stats['fat']
+    # --- 修改重點開始：計算各營養素的「熱量」而非僅是用「克數」 ---
+    # 轉換係數：蛋白質 4kcal/g, 碳水 4kcal/g, 脂肪 9kcal/g
+    prot_cal = daily_stats['prot'] * 4
+    carb_cal = daily_stats['carb'] * 4
+    fat_cal = daily_stats['fat'] * 9
+    total_macro_cal = prot_cal + carb_cal + fat_cal
+
     macros_data = pd.DataFrame({
         'Nutrient': ['蛋白質', '碳水化合物', '脂肪'],
-        'Grams': [daily_stats['prot'], daily_stats['carb'], daily_stats['fat']]
+        'Grams': [daily_stats['prot'], daily_stats['carb'], daily_stats['fat']],
+        'Calories': [prot_cal, carb_cal, fat_cal]  # 新增熱量欄位
     })
-    macros_data['Percentage'] = (macros_data['Grams'] / total_g) * 100 if total_g > 0 else 0
+    
+    # 百分比改用「熱量」來計算
+    macros_data['Percentage'] = (macros_data['Calories'] / total_macro_cal) * 100 if total_macro_cal > 0 else 0
+    # --- 修改重點結束 ---
     
     # 🔥🔥🔥 衝刺警示系統 (168 修正版) 🔥🔥🔥
     alerts = []
@@ -380,14 +390,21 @@ col_p2.metric("今日剩餘熱量額度", f"{int(calories_left)} kcal")
 prog_val = min(analysis['cal_percent'] / 100, 1.0)
 col_p2.progress(prog_val)
 
-# 3. 營養比例
-if not analysis['macros_data'].empty and analysis['macros_data']['Grams'].sum() > 0:
+# 3. 營養比例 (熱量佔比)
+if not analysis['macros_data'].empty and analysis['macros_data']['Calories'].sum() > 0:
     chart = alt.Chart(analysis['macros_data']).mark_arc(outerRadius=100).encode(
-        theta=alt.Theta(field="Grams", type="quantitative"),
+        # 修改：theta 改抓 Calories (熱量)
+        theta=alt.Theta(field="Calories", type="quantitative"),
         color=alt.Color(field="Nutrient", type="nominal", scale=alt.Scale(domain=['蛋白質', '碳水化合物', '脂肪'], range=['#FF4B4B', '#3186CC', '#FFAA00'])),
         order=alt.Order(field="Percentage", sort="descending"),
-        tooltip=["Nutrient", "Grams", alt.Tooltip("Percentage", format=".1f")]
-    ).properties(title="營養素比例")
+        # 修改：Tooltip 增加顯示熱量
+        tooltip=[
+            "Nutrient", 
+            alt.Tooltip("Grams", format=".1f", title="重量(g)"), 
+            alt.Tooltip("Calories", format=".0f", title="熱量(kcal)"),
+            alt.Tooltip("Percentage", format=".1f", title="熱量佔比(%)")
+        ]
+    ).properties(title="營養素熱量比例")
     col_p3.altair_chart(chart, use_container_width=True)
 else:
     col_p3.info("尚無數據")
@@ -538,6 +555,7 @@ with tab4:
         save_config('target_cal', new_target_cal)
         save_config('target_protein', new_target_protein)
         st.success("✅ 設定已更新！")
+
 
 
 
