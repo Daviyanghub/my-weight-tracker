@@ -330,8 +330,8 @@ def calculate_daily_macros_goal(daily_stats, config):
     }
 
 # ================= 介面開始 =================
-st.set_page_config(layout="wide", page_title="健康管家 AI - 168 衝刺版")
-st.title('🚀 1/1 減重衝刺戰情室 (168 斷食)')
+st.set_page_config(layout="wide", page_title="健康管家")
+st.title('🚀 1月份減重衝刺戰情室')
 
 config = get_config()
 target_water = config.get('target_water', 3000)
@@ -361,7 +361,7 @@ col1, col2, col3, col4, col5 = st.columns(5)
 col1.metric("💧 飲水", f"{int(daily_stats['water'])} ml", delta=water_delta)
 col2.metric("🔥 熱量", f"{int(daily_stats['cal'])} kcal", delta=f"上限 {target_cal}", delta_color="inverse")
 col3.metric("🥩 蛋白質", f"{int(daily_stats['prot'])} g", delta=f"目標 {target_protein}")
-col4.metric("🍚 碳水", f"{int(daily_stats['carb'])} g", delta="建議 < 100")
+col4.metric("🍚 碳水", f"{int(daily_stats['carb'])} g", delta="建議 < 120")
 col5.metric("🥑 脂肪", f"{int(daily_stats['fat'])} g")
 st.divider()
 
@@ -573,6 +573,7 @@ with tab4:
         save_config('target_cal', new_target_cal)
         save_config('target_protein', new_target_protein)
         st.success("✅ 設定已更新！")
+
 
 
 
