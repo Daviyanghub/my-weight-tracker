@@ -434,15 +434,17 @@ tab1, tab2, tab3, tab4 = st.tabs(["⚖️ 體重 & 目標", "📸 飲食分析",
 with tab1:
     col_w1, col_w2 = st.columns([1, 2])
     with col_w1:
-        st.markdown("#### 紀錄身體數據") # 改一下標題
-        # ... (日期、身高、體重程式碼不變) ...
+        st.markdown("#### 紀錄身體數據")
+        default_date_tw = datetime.now(TAIPEI_TZ).date()
+        w_date = st.date_input("日期", default_date_tw, key="w_input_date")
+        w_height = st.number_input("身高 (cm)", 100.0, 250.0, 170.0)
         w_weight = st.number_input("體重 (kg)", 0.0, 200.0, step=0.1, format="%.1f")
-        
-        # 🔥 新增腰圍輸入
         w_waist = st.number_input("腰圍 (cm)", 40.0, 150.0, step=0.1, format="%.1f")
-        
-        # ... (BMI 計算不變) ...
-            
+                
+        bmi = 0
+        if w_height > 0:
+            bmi = w_weight / ((w_height / 100) ** 2)
+            st.caption(f"BMI: {bmi:.1f}")
         if st.button("紀錄數據"):
             # 呼叫更新後的函式
             save_weight_data(w_date, w_height, w_weight, round(bmi, 1), w_waist)
@@ -571,6 +573,7 @@ with tab4:
         save_config('target_cal', new_target_cal)
         save_config('target_protein', new_target_protein)
         st.success("✅ 設定已更新！")
+
 
 
 
