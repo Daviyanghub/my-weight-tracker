@@ -336,8 +336,8 @@ st.title('🚀 1/1 減重衝刺戰情室 (168 斷食)')
 config = get_config()
 target_water = config.get('target_water', 3000)
 target_weight = config.get('target_weight', 75.0)
-target_cal = config.get('target_cal', 1500)
-target_protein = config.get('target_protein', 160)
+target_cal = config.get('target_cal', 1600)
+target_protein = config.get('target_protein', 150)
 
 # --- 儀表板 ---
 st.markdown("### 📅 每日戰況")
@@ -573,6 +573,7 @@ with tab4:
         save_config('target_cal', new_target_cal)
         save_config('target_protein', new_target_protein)
         st.success("✅ 設定已更新！")
+
 
 
 
