@@ -82,8 +82,8 @@ def get_config():
     # 🔥🔥🔥 1/1 衝刺計畫 (168 斷食版) 預設值 🔥🔥🔥
     if 'target_weight' not in config: config['target_weight'] = 75.0
     if 'target_water' not in config: config['target_water'] = 3000
-    if 'target_cal' not in config: config['target_cal'] = 1500
-    if 'target_protein' not in config: config['target_protein'] = 160
+    if 'target_cal' not in config: config['target_cal'] = 1600
+    if 'target_protein' not in config: config['target_protein'] = 150
     
     return config
 
@@ -573,6 +573,7 @@ with tab4:
         save_config('target_cal', new_target_cal)
         save_config('target_protein', new_target_protein)
         st.success("✅ 設定已更新！")
+
 
 
 
