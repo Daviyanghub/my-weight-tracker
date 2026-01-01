@@ -30,7 +30,7 @@ def get_google_sheet(sheet_name):
     HEADERS = {
         FOOD_SHEET_NAME: ['日期', '時間', '食物名稱', '熱量', '蛋白質', '碳水', '脂肪'],
         WATER_SHEET_NAME: ['日期', '時間', '水量(ml)'],
-        WEIGHT_SHEET_NAME: ['日期', '身高', '體重', 'BMI'],
+        WEIGHT_SHEET_NAME: ['日期', '身高', '體重', 'BMI', '腰圍'],
         CONFIG_SHEET_NAME: ['Key', 'Value']
     }
     
@@ -221,9 +221,9 @@ def save_config(key, value):
             
     st.cache_data.clear()
 
-def save_weight_data(d, h, w, b):
+def save_weight_data(d, h, w, b, waist): # 多一個 waist 參數
     ws = get_google_sheet(WEIGHT_SHEET_NAME)
-    ws.append_row([str(d), h, w, b])
+    ws.append_row([str(d), h, w, b, waist]) # 寫入五個值
     st.cache_data.clear()
 
 def save_food_data(date_str, time_str, food, cal, prot, carb, fat):
@@ -430,22 +430,22 @@ st.divider()
 tab1, tab2, tab3, tab4 = st.tabs(["⚖️ 體重 & 目標", "📸 飲食分析", "💧 飲水", "⚙️ 設定"])
 
 # --- Tab 1: 體重 & 目標 ---
+# --- Tab 1: 體重 & 目標 ---
 with tab1:
     col_w1, col_w2 = st.columns([1, 2])
     with col_w1:
-        st.markdown("#### 紀錄體重")
-        default_date_tw = datetime.now(TAIPEI_TZ).date()
-        w_date = st.date_input("日期", default_date_tw, key="w_input_date")
-        w_height = st.number_input("身高 (cm)", 100.0, 250.0, 170.0)
+        st.markdown("#### 紀錄身體數據") # 改一下標題
+        # ... (日期、身高、體重程式碼不變) ...
         w_weight = st.number_input("體重 (kg)", 0.0, 200.0, step=0.1, format="%.1f")
         
-        bmi = 0
-        if w_height > 0:
-            bmi = w_weight / ((w_height / 100) ** 2)
-            st.caption(f"BMI: {bmi:.1f}")
+        # 🔥 新增腰圍輸入
+        w_waist = st.number_input("腰圍 (cm)", 40.0, 150.0, step=0.1, format="%.1f")
+        
+        # ... (BMI 計算不變) ...
             
-        if st.button("紀錄體重"):
-            save_weight_data(w_date, w_height, w_weight, round(bmi, 1))
+        if st.button("紀錄數據"):
+            # 呼叫更新後的函式
+            save_weight_data(w_date, w_height, w_weight, round(bmi, 1), w_waist)
             st.success("✅ 紀錄成功！")
             st.rerun()
 
@@ -571,6 +571,7 @@ with tab4:
         save_config('target_cal', new_target_cal)
         save_config('target_protein', new_target_protein)
         st.success("✅ 設定已更新！")
+
 
 
 
